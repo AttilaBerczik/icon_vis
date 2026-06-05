@@ -8,12 +8,21 @@ function renderGraph(levels, depthById, nodes, edges) {
     levels.forEach((levelIds, depth) => {
         levelIds.forEach((id) => {
             const rawLabel = nodes.get(id) || id;
-            const lines = rawLabel.split("\\n");
+            const labelInfo = parseNodeLabel(rawLabel);
+            const lines = labelInfo.lines;
             lines.forEach((line) => {
                 maxLineLength = Math.max(maxLineLength, line.length);
             });
             maxLines = Math.max(maxLines, lines.length);
-            nodeData.push({ id, depth, rawLabel, lines });
+            nodeData.push({
+                id,
+                depth,
+                rawLabel,
+                lines,
+                folder: labelInfo.folder,
+                file: labelInfo.file,
+                fileKey: makeFileKey(labelInfo.folder, labelInfo.file)
+            });
         });
     });
 
@@ -22,32 +31,23 @@ function renderGraph(levels, depthById, nodes, edges) {
     const xSpacing = nodeWidth + 40;
     const ySpacing = nodeHeight + 70;
     const margin = { top: 30, right: 30, bottom: 30, left: 30 };
-    const uniqueFiles = new Set();
-    levels.forEach((levelIds) => {
-        levelIds.forEach((id) => {
-            const filename = getNodeFile(id, nodes);
-            uniqueFiles.add(filename);
-        });
-    });
-
-    const filesArray = Array.from(uniqueFiles);
-    const { fileOrder, nodeOrderByFileDepth } = optimizeLayout(
-        levels,
-        depthById,
-        nodes,
-        edges,
-        filesArray
-    );
+    const { folderOrder, fileOrderByFolder, fileMetaByKey } = buildFolderFileIndex(levels, nodes);
+    const { folderOrder: orderedFolders, fileOrderByFolder: orderedFilesByFolder, nodeOrderByFileDepth } =
+        optimizeLayout(levels, depthById, nodes, edges, folderOrder, fileOrderByFolder);
+    const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
     const maxNodesPerLevelByFile = new Map();
     fileOrder.forEach((f) => maxNodesPerLevelByFile.set(f, 0));
 
     levels.forEach((levelIds) => {
         const counts = new Map();
         levelIds.forEach((id) => {
-            const filename = getNodeFile(id, nodes);
-            counts.set(filename, (counts.get(filename) || 0) + 1);
+            const fileKey = getNodeFileKey(id, nodes);
+            counts.set(fileKey, (counts.get(fileKey) || 0) + 1);
         });
         for (const [f, c] of counts.entries()) {
+            if (!maxNodesPerLevelByFile.has(f)) {
+                maxNodesPerLevelByFile.set(f, 0);
+            }
             if (c > maxNodesPerLevelByFile.get(f)) {
                 maxNodesPerLevelByFile.set(f, c);
             }
@@ -56,10 +56,13 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     const fileStartX = new Map();
     let currentX = margin.left;
-    fileOrder.forEach((f) => {
-        fileStartX.set(f, currentX);
-        const colWidth = maxNodesPerLevelByFile.get(f) * xSpacing;
-        currentX += colWidth;
+    orderedFolders.forEach((folder) => {
+        const files = orderedFilesByFolder.get(folder) || [];
+        files.forEach((f) => {
+            fileStartX.set(f, currentX);
+            const colWidth = maxNodesPerLevelByFile.get(f) * xSpacing;
+            currentX += colWidth;
+        });
     });
 
     const svgWidth = Math.max(900, currentX + margin.right);
@@ -69,23 +72,26 @@ function renderGraph(levels, depthById, nodes, edges) {
     const positions = new Map();
 
     levels.forEach((_, depth) => {
-        fileOrder.forEach((f) => {
-            const depthMap = nodeOrderByFileDepth.get(f);
-            const ids = depthMap ? depthMap.get(depth) : null;
-            if (!ids || ids.length === 0) {
-                return;
-            }
-            const startX = fileStartX.get(f);
-            const N = maxNodesPerLevelByFile.get(f);
-            const K = ids.length;
+        orderedFolders.forEach((folder) => {
+            const files = orderedFilesByFolder.get(folder) || [];
+            files.forEach((f) => {
+                const depthMap = nodeOrderByFileDepth.get(f);
+                const ids = depthMap ? depthMap.get(depth) : null;
+                if (!ids || ids.length === 0) {
+                    return;
+                }
+                const startX = fileStartX.get(f);
+                const N = maxNodesPerLevelByFile.get(f);
+                const K = ids.length;
 
-            const colCenter = startX + N * xSpacing / 2;
-            const firstNodeCenterX = colCenter - (K - 1) * xSpacing / 2;
+                const colCenter = startX + N * xSpacing / 2;
+                const firstNodeCenterX = colCenter - (K - 1) * xSpacing / 2;
 
-            ids.forEach((id, index) => {
-                const x = firstNodeCenterX + index * xSpacing;
-                const y = margin.top + nodeHeight / 2 + depth * ySpacing;
-                positions.set(id, { x, y });
+                ids.forEach((id, index) => {
+                    const x = firstNodeCenterX + index * xSpacing;
+                    const y = margin.top + nodeHeight / 2 + depth * ySpacing;
+                    positions.set(id, { x, y });
+                });
             });
         });
     });
@@ -122,64 +128,124 @@ function renderGraph(levels, depthById, nodes, edges) {
     fileOrder.forEach((f) => {
         fileBoxes.set(f, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, active: false });
     });
+    const folderBoxes = new Map();
+    orderedFolders.forEach((folder) => {
+        folderBoxes.set(folder, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, active: false });
+    });
 
-    nodeData.forEach(d => {
-        const filename = d.rawLabel.split("\\n")[0];
+    nodeData.forEach((d) => {
         const pos = positions.get(d.id);
-        const box = fileBoxes.get(filename);
-        box.active = true;
-        box.minX = Math.min(box.minX, pos.x - nodeWidth / 2);
-        box.maxX = Math.max(box.maxX, pos.x + nodeWidth / 2);
-        box.minY = Math.min(box.minY, pos.y - nodeHeight / 2);
-        box.maxY = Math.max(box.maxY, pos.y + nodeHeight / 2);
+        const fileBox = fileBoxes.get(d.fileKey);
+        if (fileBox) {
+            fileBox.active = true;
+            fileBox.minX = Math.min(fileBox.minX, pos.x - nodeWidth / 2);
+            fileBox.maxX = Math.max(fileBox.maxX, pos.x + nodeWidth / 2);
+            fileBox.minY = Math.min(fileBox.minY, pos.y - nodeHeight / 2);
+            fileBox.maxY = Math.max(fileBox.maxY, pos.y + nodeHeight / 2);
+        }
+
+        const folderBox = folderBoxes.get(d.folder);
+        if (folderBox) {
+            folderBox.active = true;
+            folderBox.minX = Math.min(folderBox.minX, pos.x - nodeWidth / 2);
+            folderBox.maxX = Math.max(folderBox.maxX, pos.x + nodeWidth / 2);
+            folderBox.minY = Math.min(folderBox.minY, pos.y - nodeHeight / 2);
+            folderBox.maxY = Math.max(folderBox.maxY, pos.y + nodeHeight / 2);
+        }
     });
 
     const boxPadding = 20;
-    const boxData = [];
-    const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
-    
-    fileOrder.forEach((f, i) => {
-        const box = fileBoxes.get(f);
+    const fileBoxData = [];
+    const folderBoxData = [];
+    const fileColorScale = d3.scaleOrdinal(d3.schemeCategory10);
+    const folderColorScale = d3.scaleOrdinal(d3.schemeSet3);
+
+    orderedFolders.forEach((folder, i) => {
+        const box = folderBoxes.get(folder);
         if (box.active) {
-            boxData.push({
-                file: f,
+            folderBoxData.push({
+                folder,
                 x: box.minX - boxPadding,
                 y: box.minY - boxPadding,
                 width: box.maxX - box.minX + 2 * boxPadding,
                 height: box.maxY - box.minY + 2 * boxPadding,
-                color: colorScale(i)
+                color: folderColorScale(i)
             });
         }
     });
 
-    const boxesGroup = svg.append("g").attr("class", "bounding-boxes");
-    
-    boxesGroup.selectAll("rect")
-        .data(boxData)
+    fileOrder.forEach((f, i) => {
+        const box = fileBoxes.get(f);
+        if (box.active) {
+            const meta = fileMetaByKey.get(f);
+            const label = meta && meta.file ? meta.file : f;
+            fileBoxData.push({
+                file: f,
+                label,
+                x: box.minX - boxPadding,
+                y: box.minY - boxPadding,
+                width: box.maxX - box.minX + 2 * boxPadding,
+                height: box.maxY - box.minY + 2 * boxPadding,
+                color: fileColorScale(i)
+            });
+        }
+    });
+
+    const folderBoxesGroup = svg.append("g").attr("class", "folder-bounding-boxes");
+    folderBoxesGroup.selectAll("rect")
+        .data(folderBoxData)
         .enter()
         .append("rect")
-        .attr("x", d => d.x)
-        .attr("y", d => d.y)
-        .attr("width", d => d.width)
-        .attr("height", d => d.height)
-        .attr("fill", d => d.color)
+        .attr("x", (d) => d.x)
+        .attr("y", (d) => d.y)
+        .attr("width", (d) => d.width)
+        .attr("height", (d) => d.height)
+        .attr("fill", (d) => d.color)
+        .attr("fill-opacity", 0.05)
+        .attr("stroke", (d) => d.color)
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "8,4")
+        .attr("rx", 12);
+
+    folderBoxesGroup.selectAll("text.folder-box-label")
+        .data(folderBoxData)
+        .enter()
+        .append("text")
+        .attr("class", "folder-box-label")
+        .attr("x", (d) => d.x + 10)
+        .attr("y", (d) => d.y + 20)
+        .attr("fill", (d) => d.color)
+        .style("font-weight", "bold")
+        .style("font-size", "14px")
+        .text((d) => d.folder);
+
+    const fileBoxesGroup = svg.append("g").attr("class", "file-bounding-boxes");
+    fileBoxesGroup.selectAll("rect")
+        .data(fileBoxData)
+        .enter()
+        .append("rect")
+        .attr("x", (d) => d.x)
+        .attr("y", (d) => d.y)
+        .attr("width", (d) => d.width)
+        .attr("height", (d) => d.height)
+        .attr("fill", (d) => d.color)
         .attr("fill-opacity", 0.08)
-        .attr("stroke", d => d.color)
+        .attr("stroke", (d) => d.color)
         .attr("stroke-width", 2)
         .attr("stroke-dasharray", "5,5")
         .attr("rx", 10);
-        
-    boxesGroup.selectAll("text.box-label")
-        .data(boxData)
+
+    fileBoxesGroup.selectAll("text.file-box-label")
+        .data(fileBoxData)
         .enter()
         .append("text")
-        .attr("class", "box-label")
-        .attr("x", d => d.x + 10)
-        .attr("y", d => d.y + 20)
-        .attr("fill", d => d.color)
+        .attr("class", "file-box-label")
+        .attr("x", (d) => d.x + 10)
+        .attr("y", (d) => d.y + 34)
+        .attr("fill", (d) => d.color)
         .style("font-weight", "bold")
-        .style("font-size", "14px")
-        .text(d => d.file);
+        .style("font-size", "12px")
+        .text((d) => d.label);
 
     svg.append("g").attr("class", "level-lines")
         .selectAll("line")

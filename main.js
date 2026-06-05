@@ -1,7 +1,8 @@
-const ROOT_LABEL = "icon.f90\\n__MAIN__";
+const ROOT_FILE = "icon.f90";
+const ROOT_FUNCTION = "__MAIN__";
 const container = d3.select("#visualization");
 
-fetch("callgraph.dot")
+fetch("callgraph_folders.dot")
     .then((response) => {
         if (!response.ok) {
             throw new Error("Unable to load callgraph.dot");
@@ -12,7 +13,9 @@ fetch("callgraph.dot")
         const { nodes, edges } = parseDot(dotText);
         let rootId = null;
         for (const [id, label] of nodes.entries()) {
-            if (label === ROOT_LABEL) {
+            const labelInfo = parseNodeLabel(label);
+            const functionName = labelInfo.lines[labelInfo.lines.length - 1];
+            if (labelInfo.file === ROOT_FILE && functionName === ROOT_FUNCTION) {
                 rootId = id;
                 break;
             }
@@ -39,6 +42,13 @@ if (toggleEdges) {
 const toggleBoxes = document.getElementById("toggle-boxes");
 if (toggleBoxes) {
     toggleBoxes.addEventListener("change", (e) => {
-        d3.selectAll(".bounding-boxes").style("display", e.target.checked ? "block" : "none");
+        d3.selectAll(".file-bounding-boxes").style("display", e.target.checked ? "block" : "none");
+    });
+}
+
+const toggleFolderBoxes = document.getElementById("toggle-folder-boxes");
+if (toggleFolderBoxes) {
+    toggleFolderBoxes.addEventListener("change", (e) => {
+        d3.selectAll(".folder-bounding-boxes").style("display", e.target.checked ? "block" : "none");
     });
 }

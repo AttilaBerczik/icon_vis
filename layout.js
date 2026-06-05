@@ -1,5 +1,24 @@
 const MAX_DEPTH = 3;
 
+function parseNodeLabel(rawLabel) {
+    const label = rawLabel ?? "";
+    const lines = String(label).split(/\\n|\n/);
+    if (lines.length >= 3) {
+        return { folder: lines[0], file: lines[1], lines };
+    }
+    if (lines.length === 2) {
+        return { folder: "", file: lines[0], lines };
+    }
+    return { folder: "", file: lines[0] || String(label), lines };
+}
+
+function makeFileKey(folder, file) {
+    if (folder && file) {
+        return `${folder}/${file}`;
+    }
+    return file || folder || "";
+}
+
 function buildLevels(rootId, edges) {
     const levels = Array.from({ length: MAX_DEPTH + 1 }, () => []);
     const depthById = new Map();
@@ -31,19 +50,70 @@ function buildLevels(rootId, edges) {
     return { levels, depthById };
 }
 
-function getNodeFile(id, nodes) {
+function getNodeFolder(id, nodes) {
     const rawLabel = nodes.get(id) || id;
-    return rawLabel.split("\\n")[0];
+    return parseNodeLabel(rawLabel).folder;
 }
 
-function buildInitialLayout(levels, nodes, filesArray) {
+function getNodeFile(id, nodes) {
+    const rawLabel = nodes.get(id) || id;
+    return parseNodeLabel(rawLabel).file;
+}
+
+function getNodeFileKey(id, nodes) {
+    const rawLabel = nodes.get(id) || id;
+    const { folder, file } = parseNodeLabel(rawLabel);
+    return makeFileKey(folder, file);
+}
+
+function buildFolderFileIndex(levels, nodes) {
+    const folderOrder = [];
+    const fileOrderByFolder = new Map();
+    const fileMetaByKey = new Map();
+    const folderSeen = new Set();
+    const fileSeenByFolder = new Map();
+
+    levels.forEach((levelIds) => {
+        levelIds.forEach((id) => {
+            const folder = getNodeFolder(id, nodes);
+            const file = getNodeFile(id, nodes);
+            const fileKey = makeFileKey(folder, file);
+
+            if (!folderSeen.has(folder)) {
+                folderSeen.add(folder);
+                folderOrder.push(folder);
+                fileOrderByFolder.set(folder, []);
+                fileSeenByFolder.set(folder, new Set());
+            }
+
+            const fileSeen = fileSeenByFolder.get(folder);
+            if (!fileSeen.has(fileKey)) {
+                fileSeen.add(fileKey);
+                fileOrderByFolder.get(folder).push(fileKey);
+            }
+
+            if (!fileMetaByKey.has(fileKey)) {
+                fileMetaByKey.set(fileKey, { folder, file });
+            }
+        });
+    });
+
+    return { folderOrder, fileOrderByFolder, fileMetaByKey };
+}
+
+function buildInitialLayout(levels, nodes, fileOrderByFolder) {
     const nodeOrderByFileDepth = new Map();
-    filesArray.forEach((f) => nodeOrderByFileDepth.set(f, new Map()));
+    for (const files of fileOrderByFolder.values()) {
+        files.forEach((f) => nodeOrderByFileDepth.set(f, new Map()));
+    }
 
     levels.forEach((levelIds, depth) => {
         levelIds.forEach((id) => {
-            const filename = getNodeFile(id, nodes);
-            const depthMap = nodeOrderByFileDepth.get(filename);
+            const fileKey = getNodeFileKey(id, nodes);
+            if (!nodeOrderByFileDepth.has(fileKey)) {
+                nodeOrderByFileDepth.set(fileKey, new Map());
+            }
+            const depthMap = nodeOrderByFileDepth.get(fileKey);
             if (!depthMap.has(depth)) {
                 depthMap.set(depth, []);
             }
@@ -51,7 +121,7 @@ function buildInitialLayout(levels, nodes, filesArray) {
         });
     });
 
-    return { fileOrder: filesArray.slice(), nodeOrderByFileDepth };
+    return { nodeOrderByFileDepth };
 }
 
 function buildEdgesByDepth(edges, depthById) {
@@ -93,6 +163,17 @@ function buildIndexByDepth(levels, fileOrder, nodeOrderByFileDepth) {
         indexByDepth.set(depth, map);
     });
     return indexByDepth;
+}
+
+function flattenFileOrder(folderOrder, fileOrderByFolder) {
+    const fileOrder = [];
+    folderOrder.forEach((folder) => {
+        const files = fileOrderByFolder.get(folder);
+        if (files && files.length) {
+            fileOrder.push(...files);
+        }
+    });
+    return fileOrder;
 }
 
 function fenwickAdd(bit, index, delta) {
@@ -140,7 +221,8 @@ function countCrossingsForLayer(edgesLayer, sourceIndex, targetIndex) {
     return inversions;
 }
 
-function countCrossings(levels, edgesByDepth, fileOrder, nodeOrderByFileDepth) {
+function countCrossings(levels, edgesByDepth, folderOrder, fileOrderByFolder, nodeOrderByFileDepth) {
+    const fileOrder = flattenFileOrder(folderOrder, fileOrderByFolder);
     const indexByDepth = buildIndexByDepth(levels, fileOrder, nodeOrderByFileDepth);
     let total = 0;
     for (let depth = 0; depth < levels.length - 1; depth += 1) {
@@ -170,12 +252,28 @@ function cloneNodeOrder(nodeOrderByFileDepth) {
     return clone;
 }
 
-function optimizeLayout(levels, depthById, nodes, edges, filesArray) {
-    const { fileOrder, nodeOrderByFileDepth } = buildInitialLayout(levels, nodes, filesArray);
+function cloneFileOrderByFolder(fileOrderByFolder) {
+    const clone = new Map();
+    for (const [folder, files] of fileOrderByFolder.entries()) {
+        clone.set(folder, files.slice());
+    }
+    return clone;
+}
+
+function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileOrderByFolderInput) {
+    const folderOrder = folderOrderInput.slice();
+    const fileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolderInput);
+    const { nodeOrderByFileDepth } = buildInitialLayout(levels, nodes, fileOrderByFolder);
     const edgesByDepth = buildEdgesByDepth(edges, depthById);
-    let currentCrossings = countCrossings(levels, edgesByDepth, fileOrder, nodeOrderByFileDepth);
+    let currentCrossings = countCrossings(
+        levels,
+        edgesByDepth,
+        folderOrder,
+        fileOrderByFolder,
+        nodeOrderByFileDepth
+    );
     if (currentCrossings === 0) {
-        return { fileOrder, nodeOrderByFileDepth };
+        return { folderOrder, fileOrderByFolder, nodeOrderByFileDepth };
     }
 
     const totalNodes = levels.reduce((acc, level) => acc + level.length, 0);
@@ -192,26 +290,36 @@ function optimizeLayout(levels, depthById, nodes, edges, filesArray) {
         }
     }
 
+    const fileSwapCandidates = folderOrder.filter((folder) => {
+        const files = fileOrderByFolder.get(folder);
+        return files && files.length >= 2;
+    });
+
     const hasNodeSwap = swapCandidates.length > 0;
-    const hasFileSwap = fileOrder.length >= 2;
-    if (!hasNodeSwap && !hasFileSwap) {
-        return { fileOrder, nodeOrderByFileDepth };
+    const hasFileSwap = fileSwapCandidates.length > 0;
+    const hasFolderSwap = folderOrder.length >= 2;
+    if (!hasNodeSwap && !hasFileSwap && !hasFolderSwap) {
+        return { folderOrder, fileOrderByFolder, nodeOrderByFileDepth };
     }
 
     let bestCrossings = currentCrossings;
-    let bestFileOrder = fileOrder.slice();
+    let bestFolderOrder = folderOrder.slice();
+    let bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
     let bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
 
     for (let i = 0; i < iterations; i += 1) {
         const temperature = Math.max(0.001, initialTemp * Math.pow(cooling, i));
-        let moveType = "nodeSwap";
-        if (!hasNodeSwap) {
-            moveType = "fileSwap";
-        } else if (!hasFileSwap) {
-            moveType = "nodeSwap";
-        } else if (Math.random() < 0.3) {
-            moveType = "fileSwap";
+        const moveTypes = [];
+        if (hasNodeSwap) {
+            moveTypes.push("nodeSwap");
         }
+        if (hasFileSwap) {
+            moveTypes.push("fileSwap");
+        }
+        if (hasFolderSwap) {
+            moveTypes.push("folderSwap");
+        }
+        const moveType = moveTypes[Math.floor(Math.random() * moveTypes.length)];
 
         if (moveType === "nodeSwap") {
             const pick = swapCandidates[Math.floor(Math.random() * swapCandidates.length)];
@@ -226,7 +334,13 @@ function optimizeLayout(levels, depthById, nodes, edges, filesArray) {
             ids[a] = ids[b];
             ids[b] = tmp;
 
-            const newCrossings = countCrossings(levels, edgesByDepth, fileOrder, nodeOrderByFileDepth);
+            const newCrossings = countCrossings(
+                levels,
+                edgesByDepth,
+                folderOrder,
+                fileOrderByFolder,
+                nodeOrderByFileDepth
+            );
             const accept =
                 newCrossings < currentCrossings ||
                 Math.random() < Math.exp((currentCrossings - newCrossings) / temperature);
@@ -234,7 +348,8 @@ function optimizeLayout(levels, depthById, nodes, edges, filesArray) {
                 currentCrossings = newCrossings;
                 if (newCrossings < bestCrossings) {
                     bestCrossings = newCrossings;
-                    bestFileOrder = fileOrder.slice();
+                    bestFolderOrder = folderOrder.slice();
+                    bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
                     bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
                 }
             } else {
@@ -242,17 +357,25 @@ function optimizeLayout(levels, depthById, nodes, edges, filesArray) {
                 ids[a] = ids[b];
                 ids[b] = revert;
             }
-        } else {
-            const a = Math.floor(Math.random() * fileOrder.length);
-            let b = Math.floor(Math.random() * fileOrder.length);
+        } else if (moveType === "fileSwap") {
+            const folder = fileSwapCandidates[Math.floor(Math.random() * fileSwapCandidates.length)];
+            const files = fileOrderByFolder.get(folder);
+            const a = Math.floor(Math.random() * files.length);
+            let b = Math.floor(Math.random() * files.length);
             while (b === a) {
-                b = Math.floor(Math.random() * fileOrder.length);
+                b = Math.floor(Math.random() * files.length);
             }
-            const tmp = fileOrder[a];
-            fileOrder[a] = fileOrder[b];
-            fileOrder[b] = tmp;
+            const tmp = files[a];
+            files[a] = files[b];
+            files[b] = tmp;
 
-            const newCrossings = countCrossings(levels, edgesByDepth, fileOrder, nodeOrderByFileDepth);
+            const newCrossings = countCrossings(
+                levels,
+                edgesByDepth,
+                folderOrder,
+                fileOrderByFolder,
+                nodeOrderByFileDepth
+            );
             const accept =
                 newCrossings < currentCrossings ||
                 Math.random() < Math.exp((currentCrossings - newCrossings) / temperature);
@@ -260,16 +383,54 @@ function optimizeLayout(levels, depthById, nodes, edges, filesArray) {
                 currentCrossings = newCrossings;
                 if (newCrossings < bestCrossings) {
                     bestCrossings = newCrossings;
-                    bestFileOrder = fileOrder.slice();
+                    bestFolderOrder = folderOrder.slice();
+                    bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
                     bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
                 }
             } else {
-                const revert = fileOrder[a];
-                fileOrder[a] = fileOrder[b];
-                fileOrder[b] = revert;
+                const revert = files[a];
+                files[a] = files[b];
+                files[b] = revert;
+            }
+        } else {
+            const a = Math.floor(Math.random() * folderOrder.length);
+            let b = Math.floor(Math.random() * folderOrder.length);
+            while (b === a) {
+                b = Math.floor(Math.random() * folderOrder.length);
+            }
+            const tmp = folderOrder[a];
+            folderOrder[a] = folderOrder[b];
+            folderOrder[b] = tmp;
+
+            const newCrossings = countCrossings(
+                levels,
+                edgesByDepth,
+                folderOrder,
+                fileOrderByFolder,
+                nodeOrderByFileDepth
+            );
+            const accept =
+                newCrossings < currentCrossings ||
+                Math.random() < Math.exp((currentCrossings - newCrossings) / temperature);
+            if (accept) {
+                currentCrossings = newCrossings;
+                if (newCrossings < bestCrossings) {
+                    bestCrossings = newCrossings;
+                    bestFolderOrder = folderOrder.slice();
+                    bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
+                    bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
+                }
+            } else {
+                const revert = folderOrder[a];
+                folderOrder[a] = folderOrder[b];
+                folderOrder[b] = revert;
             }
         }
     }
 
-    return { fileOrder: bestFileOrder, nodeOrderByFileDepth: bestNodeOrder };
+    return {
+        folderOrder: bestFolderOrder,
+        fileOrderByFolder: bestFileOrderByFolder,
+        nodeOrderByFileDepth: bestNodeOrder
+    };
 }
