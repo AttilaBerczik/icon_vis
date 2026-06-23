@@ -2,23 +2,36 @@ function renderGraph(levels, depthById, nodes, edges) {
     container.selectAll("*").remove();
 
     const nodeData = [];
-    let maxLineLength = 0;
-    let maxLines = 1;
+    const basePaddingX = 16; // 8px left + 8px right padding
+    const basePaddingY = 12; // 6px top + 6px bottom padding
+    const charWidthEstimate = 6.5; // Slightly tighter estimate for a 12px font
+    const lineHeight = 16;
 
+    // 1. Process node data and compute individual dimensions per node
     levels.forEach((levelIds, depth) => {
         levelIds.forEach((id) => {
             const rawLabel = nodes.get(id) || id;
             const labelInfo = parseNodeLabel(rawLabel);
             const lines = labelInfo.lines;
+
+            // Find max length just for *this* node's text
+            let localMaxLineLength = 0;
             lines.forEach((line) => {
-                maxLineLength = Math.max(maxLineLength, line.length);
+                localMaxLineLength = Math.max(localMaxLineLength, line.length);
             });
-            maxLines = Math.max(maxLines, lines.length);
+
+            // Calculate tight width and height for this specific node
+            // Removed the massive 140px / 42px minimum limits
+            const calculatedWidth = Math.max(32, localMaxLineLength * charWidthEstimate + basePaddingX);
+            const calculatedHeight = Math.max(24, lines.length * lineHeight + basePaddingY);
+
             nodeData.push({
                 id,
                 depth,
                 rawLabel,
                 lines,
+                width: calculatedWidth,
+                height: calculatedHeight,
                 folder: labelInfo.folder,
                 file: labelInfo.file,
                 fileKey: makeFileKey(labelInfo.folder, labelInfo.file)
@@ -26,95 +39,118 @@ function renderGraph(levels, depthById, nodes, edges) {
         });
     });
 
-    const nodeWidth = Math.max(200, maxLineLength * 7 + 24);
-    const nodeHeight = Math.max(42, maxLines * 16 + 18);
-    const xSpacing = nodeWidth + 40;
-    const ySpacing = nodeHeight + 70;
-    const margin = { top: 30, right: 30, bottom: 30, left: 30 };
+    // Create a quick lookup map for individual node dimensions
+    const nodeDims = new Map(nodeData.map(d => [d.id, { w: d.width, h: d.height }]));
+
+    // Layout configuration spacing
+    const xSpacingBetweenNodes = 30; // Slightly tighter space between the narrower nodes
+    const ySpacing = 120;
+    const margin = { top: 40, right: 40, bottom: 40, left: 40 };
+
     const { folderOrder, fileOrderByFolder, fileMetaByKey } = buildFolderFileIndex(levels, nodes);
     const { folderOrder: orderedFolders, fileOrderByFolder: orderedFilesByFolder, nodeOrderByFileDepth } =
         optimizeLayout(levels, depthById, nodes, edges, folderOrder, fileOrderByFolder);
     const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
+
+    // 2. Compute maximum column widths per file column based on its widest individual node
     const maxNodesPerLevelByFile = new Map();
-    fileOrder.forEach((f) => maxNodesPerLevelByFile.set(f, 0));
+    const fileColumnWidths = new Map();
+
+    fileOrder.forEach((f) => {
+        maxNodesPerLevelByFile.set(f, 0);
+        fileColumnWidths.set(f, 0);
+    });
 
     levels.forEach((levelIds) => {
         const counts = new Map();
+        const maxNodeWidthInFileForLevel = new Map();
+
         levelIds.forEach((id) => {
             const fileKey = getNodeFileKey(id, nodes);
             counts.set(fileKey, (counts.get(fileKey) || 0) + 1);
+
+            const dims = nodeDims.get(id);
+            if (dims) {
+                const currentMax = maxNodeWidthInFileForLevel.get(fileKey) || 0;
+                maxNodeWidthInFileForLevel.set(fileKey, Math.max(currentMax, dims.w));
+            }
         });
+
         for (const [f, c] of counts.entries()) {
-            if (!maxNodesPerLevelByFile.has(f)) {
-                maxNodesPerLevelByFile.set(f, 0);
-            }
-            if (c > maxNodesPerLevelByFile.get(f)) {
-                maxNodesPerLevelByFile.set(f, c);
-            }
+            maxNodesPerLevelByFile.set(f, Math.max(maxNodesPerLevelByFile.get(f) || 0, c));
+
+            // Default fallback width is now 32 instead of 140
+            const levelNodeWidth = maxNodeWidthInFileForLevel.get(f) || 32;
+            const totalLevelWidthNeeded = c * levelNodeWidth + (c - 1) * xSpacingBetweenNodes;
+            fileColumnWidths.set(f, Math.max(fileColumnWidths.get(f) || 0, totalLevelWidthNeeded));
         }
     });
 
+    // 3. Calculate file X start boundaries dynamically
     const fileStartX = new Map();
     let currentX = margin.left;
     orderedFolders.forEach((folder) => {
         const files = orderedFilesByFolder.get(folder) || [];
         files.forEach((f) => {
             fileStartX.set(f, currentX);
-            const colWidth = maxNodesPerLevelByFile.get(f) * xSpacing;
+            const colWidth = fileColumnWidths.get(f) + 40; // Structural padding between files
             currentX += colWidth;
         });
     });
 
     const svgWidth = Math.max(900, currentX + margin.right);
-    const svgHeight =
-        margin.top + margin.bottom + (levels.length - 1) * ySpacing + nodeHeight;
+    // Find absolute max height dynamic calculation
+    let maxIndividualHeight = 24;
+    nodeData.forEach(d => { if (d.height > maxIndividualHeight) maxIndividualHeight = d.height; });
+    const svgHeight = margin.top + margin.bottom + (levels.length - 1) * ySpacing + maxIndividualHeight;
 
     const positions = new Map();
 
+    // 4. Calculate positions balancing variables sizes
     levels.forEach((_, depth) => {
         orderedFolders.forEach((folder) => {
             const files = orderedFilesByFolder.get(folder) || [];
             files.forEach((f) => {
                 const depthMap = nodeOrderByFileDepth.get(f);
                 const ids = depthMap ? depthMap.get(depth) : null;
-                if (!ids || ids.length === 0) {
-                    return;
-                }
+                if (!ids || ids.length === 0) return;
+
                 const startX = fileStartX.get(f);
-                const N = maxNodesPerLevelByFile.get(f);
+                const totalColWidth = fileColumnWidths.get(f);
+                const colCenter = startX + totalColWidth / 2;
+
                 const K = ids.length;
+                let totalSubsegmentWidth = 0;
+                ids.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
+                totalSubsegmentWidth += (K - 1) * xSpacingBetweenNodes;
 
-                const colCenter = startX + N * xSpacing / 2;
-                const firstNodeCenterX = colCenter - (K - 1) * xSpacing / 2;
+                let segmentStartX = colCenter - totalSubsegmentWidth / 2;
 
-                ids.forEach((id, index) => {
-                    const x = firstNodeCenterX + index * xSpacing;
-                    const y = margin.top + nodeHeight / 2 + depth * ySpacing;
+                ids.forEach((id) => {
+                    const dims = nodeDims.get(id);
+                    const x = segmentStartX + dims.w / 2;
+                    const y = margin.top + dims.h / 2 + depth * ySpacing;
                     positions.set(id, { x, y });
+
+                    segmentStartX += dims.w + xSpacingBetweenNodes;
                 });
             });
         });
     });
 
+    // 5. Generate links
     const linkData = [];
     for (const [from, targets] of edges.entries()) {
         const fromDepth = depthById.get(from);
-        if (fromDepth === undefined || fromDepth >= MAX_DEPTH) {
-            continue;
-        }
+        if (fromDepth === undefined || fromDepth >= MAX_DEPTH) continue;
         const sourcePos = positions.get(from);
-        if (!sourcePos) {
-            continue;
-        }
+        if (!sourcePos) continue;
+
         for (const target of targets) {
-            if (depthById.get(target) !== fromDepth + 1) {
-                continue;
-            }
+            if (depthById.get(target) !== fromDepth + 1) continue;
             const targetPos = positions.get(target);
-            if (!targetPos) {
-                continue;
-            }
-            linkData.push({ source: sourcePos, target: targetPos });
+            if (!targetPos) continue;
+            linkData.push({ source: sourcePos, target: targetPos, fromId: from, toId: target });
         }
     }
 
@@ -123,7 +159,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("width", svgWidth)
         .attr("height", svgHeight);
 
-    // Compute and draw bounding boxes
+    // 6. Compute accurate bounding boxes using distinct dimensions per node
     const fileBoxes = new Map();
     fileOrder.forEach((f) => {
         fileBoxes.set(f, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, active: false });
@@ -138,19 +174,19 @@ function renderGraph(levels, depthById, nodes, edges) {
         const fileBox = fileBoxes.get(d.fileKey);
         if (fileBox) {
             fileBox.active = true;
-            fileBox.minX = Math.min(fileBox.minX, pos.x - nodeWidth / 2);
-            fileBox.maxX = Math.max(fileBox.maxX, pos.x + nodeWidth / 2);
-            fileBox.minY = Math.min(fileBox.minY, pos.y - nodeHeight / 2);
-            fileBox.maxY = Math.max(fileBox.maxY, pos.y + nodeHeight / 2);
+            fileBox.minX = Math.min(fileBox.minX, pos.x - d.width / 2);
+            fileBox.maxX = Math.max(fileBox.maxX, pos.x + d.width / 2);
+            fileBox.minY = Math.min(fileBox.minY, pos.y - d.height / 2);
+            fileBox.maxY = Math.max(fileBox.maxY, pos.y + d.height / 2);
         }
 
         const folderBox = folderBoxes.get(d.folder);
         if (folderBox) {
             folderBox.active = true;
-            folderBox.minX = Math.min(folderBox.minX, pos.x - nodeWidth / 2);
-            folderBox.maxX = Math.max(folderBox.maxX, pos.x + nodeWidth / 2);
-            folderBox.minY = Math.min(folderBox.minY, pos.y - nodeHeight / 2);
-            folderBox.maxY = Math.max(folderBox.maxY, pos.y + nodeHeight / 2);
+            folderBox.minX = Math.min(folderBox.minX, pos.x - d.width / 2);
+            folderBox.maxX = Math.max(folderBox.maxX, pos.x + d.width / 2);
+            folderBox.minY = Math.min(folderBox.minY, pos.y - d.height / 2);
+            folderBox.maxY = Math.max(folderBox.maxY, pos.y + d.height / 2);
         }
     });
 
@@ -191,6 +227,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         }
     });
 
+    // Render folder boxes
     const folderBoxesGroup = svg.append("g").attr("class", "folder-bounding-boxes");
     folderBoxesGroup.selectAll("rect")
         .data(folderBoxData)
@@ -219,6 +256,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         .style("font-size", "14px")
         .text((d) => d.folder);
 
+    // Render file boxes
     const fileBoxesGroup = svg.append("g").attr("class", "file-bounding-boxes");
     fileBoxesGroup.selectAll("rect")
         .data(fileBoxData)
@@ -247,6 +285,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         .style("font-size", "12px")
         .text((d) => d.label);
 
+    // Render baseline depth dividers
     svg.append("g").attr("class", "level-lines")
         .selectAll("line")
         .data(levels)
@@ -254,29 +293,25 @@ function renderGraph(levels, depthById, nodes, edges) {
         .append("line")
         .attr("x1", margin.left)
         .attr("x2", svgWidth - margin.right)
-        .attr(
-            "y1",
-            (_, depth) => margin.top + nodeHeight / 2 + depth * ySpacing
-        )
-        .attr(
-            "y2",
-            (_, depth) => margin.top + nodeHeight / 2 + depth * ySpacing
-        )
+        .attr("y1", (_, depth) => margin.top + maxIndividualHeight / 2 + depth * ySpacing)
+        .attr("y2", (_, depth) => margin.top + maxIndividualHeight / 2 + depth * ySpacing)
         .attr("stroke", "#e2e8f0")
         .attr("stroke-width", 1);
 
+    // 7. Dynamic link connection math (pulling top/bottom dynamically from distinct source/target heights)
     svg.append("g").attr("class", "edges")
         .selectAll("line")
         .data(linkData)
         .enter()
         .append("line")
         .attr("x1", (d) => d.source.x)
-        .attr("y1", (d) => d.source.y + nodeHeight / 2)
+        .attr("y1", (d) => d.source.y + (nodeDims.get(d.fromId).h / 2))
         .attr("x2", (d) => d.target.x)
-        .attr("y2", (d) => d.target.y - nodeHeight / 2)
+        .attr("y2", (d) => d.target.y - (nodeDims.get(d.toId).h / 2))
         .attr("stroke", "#94a3b8")
         .attr("stroke-width", 1);
 
+    // 8. Render unique grouped node sizes
     const nodeGroups = svg
         .append("g").attr("class", "nodes")
         .selectAll("g")
@@ -285,33 +320,31 @@ function renderGraph(levels, depthById, nodes, edges) {
         .append("g")
         .attr("transform", (d) => {
             const position = positions.get(d.id);
-            return `translate(${position.x - nodeWidth / 2}, ${
-                position.y - nodeHeight / 2
-            })`;
+            return `translate(${position.x - d.width / 2}, ${position.y - d.height / 2})`;
         });
 
     nodeGroups
         .append("rect")
-        .attr("width", nodeWidth)
-        .attr("height", nodeHeight)
-        .attr("rx", 8)
+        .attr("width", (d) => d.width)
+        .attr("height", (d) => d.height)
+        .attr("rx", 6) // Made slightly rounder to match the smaller boxes
         .attr("fill", (d) => (d.depth === 0 ? "#2563eb" : "#e2e8f0"))
         .attr("stroke", "#94a3b8");
 
     nodeGroups
         .append("text")
-        .attr("x", nodeWidth / 2)
-        .attr("y", nodeHeight / 2 - (maxLines - 1) * 8)
+        .attr("x", (d) => d.width / 2)
+        .attr("y", (d) => d.height / 2 - (d.lines.length - 1) * 8)
         .attr("text-anchor", "middle")
         .attr("font-size", "12px")
         .attr("fill", (d) => (d.depth === 0 ? "#f8fafc" : "#1f2937"))
         .selectAll("tspan")
-        .data((d) => d.lines)
+        .data((d) => d.lines.map(line => ({ line, width: d.width, lineCount: d.lines.length })))
         .enter()
         .append("tspan")
-        .attr("x", nodeWidth / 2)
+        .attr("x", (d) => d.width / 2)
         .attr("dy", (_, i) => (i === 0 ? 0 : 16))
-        .text((d) => d);
+        .text((d) => d.line);
 }
 
 function renderError(message) {
