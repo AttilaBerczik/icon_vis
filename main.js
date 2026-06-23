@@ -52,3 +52,13 @@ if (toggleFolderBoxes) {
         d3.selectAll(".folder-bounding-boxes").style("display", e.target.checked ? "block" : "none");
     });
 }
+
+const toggleOrthogonal = document.getElementById("toggle-orthogonal");
+if (toggleOrthogonal) {
+    toggleOrthogonal.addEventListener("change", () => {
+        const visNode = d3.select("#visualization").node();
+        if (visNode && typeof visNode.updateEdgeRouting === "function") {
+            visNode.updateEdgeRouting();
+        }
+    });
+}
