@@ -240,6 +240,37 @@ function countCrossings(levels, edgesByDepth, folderOrder, fileOrderByFolder, no
     return total;
 }
 
+function computeTotalEdgeLength(levels, edgesByDepth, folderOrder, fileOrderByFolder, nodeOrderByFileDepth) {
+    const fileOrder = flattenFileOrder(folderOrder, fileOrderByFolder);
+    const indexByDepth = buildIndexByDepth(levels, fileOrder, nodeOrderByFileDepth);
+    let totalLength = 0;
+
+    for (let depth = 0; depth < levels.length - 1; depth += 1) {
+        const edgesLayer = edgesByDepth.get(depth);
+        if (!edgesLayer) {
+            continue;
+        }
+
+        const sourceIndex = indexByDepth.get(depth);
+        const targetIndex = indexByDepth.get(depth + 1);
+        if (!sourceIndex || !targetIndex) {
+            continue;
+        }
+
+        for (const [from, to] of edgesLayer) {
+            const s = sourceIndex.get(from);
+            const t = targetIndex.get(to);
+            if (s !== undefined && t !== undefined) {
+                // Use Math.abs for linear distance. Math.abs(s - t)
+                // Alternatively, use Math.pow(s - t, 2) to heavily penalize very long edges.
+                totalLength += Math.pow(s - t, 2);
+            }
+        }
+    }
+
+    return totalLength;
+}
+
 function cloneNodeOrder(nodeOrderByFileDepth) {
     const clone = new Map();
     for (const [file, depthMap] of nodeOrderByFileDepth.entries()) {
@@ -265,20 +296,23 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
     const fileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolderInput);
     const { nodeOrderByFileDepth } = buildInitialLayout(levels, nodes, fileOrderByFolder);
     const edgesByDepth = buildEdgesByDepth(edges, depthById);
-    let currentCrossings = countCrossings(
+
+    // Switch to edge length evaluation
+    let currentLength = computeTotalEdgeLength(
         levels,
         edgesByDepth,
         folderOrder,
         fileOrderByFolder,
         nodeOrderByFileDepth
     );
-    if (currentCrossings === 0) {
+
+    if (currentLength === 0) {
         return { folderOrder, fileOrderByFolder, nodeOrderByFileDepth };
     }
 
     const totalNodes = levels.reduce((acc, level) => acc + level.length, 0);
     const iterations = Math.min(5000, Math.max(1500, totalNodes * 30));
-    const initialTemp = Math.max(1, currentCrossings * 0.25);
+    const initialTemp = Math.max(1, currentLength * 0.25);
     const cooling = 0.995;
 
     const swapCandidates = [];
@@ -302,7 +336,7 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
         return { folderOrder, fileOrderByFolder, nodeOrderByFileDepth };
     }
 
-    let bestCrossings = currentCrossings;
+    let bestLength = currentLength;
     let bestFolderOrder = folderOrder.slice();
     let bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
     let bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
@@ -310,15 +344,10 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
     for (let i = 0; i < iterations; i += 1) {
         const temperature = Math.max(0.001, initialTemp * Math.pow(cooling, i));
         const moveTypes = [];
-        if (hasNodeSwap) {
-            moveTypes.push("nodeSwap");
-        }
-        if (hasFileSwap) {
-            moveTypes.push("fileSwap");
-        }
-        if (hasFolderSwap) {
-            moveTypes.push("folderSwap");
-        }
+        if (hasNodeSwap) moveTypes.push("nodeSwap");
+        if (hasFileSwap) moveTypes.push("fileSwap");
+        if (hasFolderSwap) moveTypes.push("folderSwap");
+
         const moveType = moveTypes[Math.floor(Math.random() * moveTypes.length)];
 
         if (moveType === "nodeSwap") {
@@ -327,14 +356,13 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
             const ids = depthMap.get(pick.depth);
             const a = Math.floor(Math.random() * ids.length);
             let b = Math.floor(Math.random() * ids.length);
-            while (b === a) {
-                b = Math.floor(Math.random() * ids.length);
-            }
+            while (b === a) b = Math.floor(Math.random() * ids.length);
+
             const tmp = ids[a];
             ids[a] = ids[b];
             ids[b] = tmp;
 
-            const newCrossings = countCrossings(
+            const newLength = computeTotalEdgeLength(
                 levels,
                 edgesByDepth,
                 folderOrder,
@@ -342,12 +370,13 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
                 nodeOrderByFileDepth
             );
             const accept =
-                newCrossings < currentCrossings ||
-                Math.random() < Math.exp((currentCrossings - newCrossings) / temperature);
+                newLength < currentLength ||
+                Math.random() < Math.exp((currentLength - newLength) / temperature);
+
             if (accept) {
-                currentCrossings = newCrossings;
-                if (newCrossings < bestCrossings) {
-                    bestCrossings = newCrossings;
+                currentLength = newLength;
+                if (newLength < bestLength) {
+                    bestLength = newLength;
                     bestFolderOrder = folderOrder.slice();
                     bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
                     bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
@@ -362,14 +391,13 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
             const files = fileOrderByFolder.get(folder);
             const a = Math.floor(Math.random() * files.length);
             let b = Math.floor(Math.random() * files.length);
-            while (b === a) {
-                b = Math.floor(Math.random() * files.length);
-            }
+            while (b === a) b = Math.floor(Math.random() * files.length);
+
             const tmp = files[a];
             files[a] = files[b];
             files[b] = tmp;
 
-            const newCrossings = countCrossings(
+            const newLength = computeTotalEdgeLength(
                 levels,
                 edgesByDepth,
                 folderOrder,
@@ -377,12 +405,13 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
                 nodeOrderByFileDepth
             );
             const accept =
-                newCrossings < currentCrossings ||
-                Math.random() < Math.exp((currentCrossings - newCrossings) / temperature);
+                newLength < currentLength ||
+                Math.random() < Math.exp((currentLength - newLength) / temperature);
+
             if (accept) {
-                currentCrossings = newCrossings;
-                if (newCrossings < bestCrossings) {
-                    bestCrossings = newCrossings;
+                currentLength = newLength;
+                if (newLength < bestLength) {
+                    bestLength = newLength;
                     bestFolderOrder = folderOrder.slice();
                     bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
                     bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
@@ -395,14 +424,13 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
         } else {
             const a = Math.floor(Math.random() * folderOrder.length);
             let b = Math.floor(Math.random() * folderOrder.length);
-            while (b === a) {
-                b = Math.floor(Math.random() * folderOrder.length);
-            }
+            while (b === a) b = Math.floor(Math.random() * folderOrder.length);
+
             const tmp = folderOrder[a];
             folderOrder[a] = folderOrder[b];
             folderOrder[b] = tmp;
 
-            const newCrossings = countCrossings(
+            const newLength = computeTotalEdgeLength(
                 levels,
                 edgesByDepth,
                 folderOrder,
@@ -410,12 +438,13 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
                 nodeOrderByFileDepth
             );
             const accept =
-                newCrossings < currentCrossings ||
-                Math.random() < Math.exp((currentCrossings - newCrossings) / temperature);
+                newLength < currentLength ||
+                Math.random() < Math.exp((currentLength - newLength) / temperature);
+
             if (accept) {
-                currentCrossings = newCrossings;
-                if (newCrossings < bestCrossings) {
-                    bestCrossings = newCrossings;
+                currentLength = newLength;
+                if (newLength < bestLength) {
+                    bestLength = newLength;
                     bestFolderOrder = folderOrder.slice();
                     bestFileOrderByFolder = cloneFileOrderByFolder(fileOrderByFolder);
                     bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);

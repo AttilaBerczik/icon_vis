@@ -21,7 +21,6 @@ function renderGraph(levels, depthById, nodes, edges) {
             });
 
             // Calculate tight width and height for this specific node
-            // Removed the massive 140px / 42px minimum limits
             const calculatedWidth = Math.max(32, localMaxLineLength * charWidthEstimate + basePaddingX);
             const calculatedHeight = Math.max(24, lines.length * lineHeight + basePaddingY);
 
@@ -298,8 +297,8 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("stroke", "#e2e8f0")
         .attr("stroke-width", 1);
 
-    // 7. Dynamic link connection math (pulling top/bottom dynamically from distinct source/target heights)
-    svg.append("g").attr("class", "edges")
+    // 7. Dynamic link connection math (assigned to variable edgesSelection)
+    const edgesSelection = svg.append("g").attr("class", "edges")
         .selectAll("line")
         .data(linkData)
         .enter()
@@ -311,8 +310,8 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("stroke", "#94a3b8")
         .attr("stroke-width", 1);
 
-    // 8. Render unique grouped node sizes
-    const nodeGroups = svg
+    // 8. Render unique grouped node sizes (assigned to variable nodesSelection)
+    const nodesSelection = svg
         .append("g").attr("class", "nodes")
         .selectAll("g")
         .data(nodeData)
@@ -323,15 +322,15 @@ function renderGraph(levels, depthById, nodes, edges) {
             return `translate(${position.x - d.width / 2}, ${position.y - d.height / 2})`;
         });
 
-    nodeGroups
+    nodesSelection
         .append("rect")
         .attr("width", (d) => d.width)
         .attr("height", (d) => d.height)
-        .attr("rx", 6) // Made slightly rounder to match the smaller boxes
+        .attr("rx", 6)
         .attr("fill", (d) => (d.depth === 0 ? "#2563eb" : "#e2e8f0"))
         .attr("stroke", "#94a3b8");
 
-    nodeGroups
+    nodesSelection
         .append("text")
         .attr("x", (d) => d.width / 2)
         .attr("y", (d) => d.height / 2 - (d.lines.length - 1) * 8)
@@ -345,6 +344,9 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("x", (d) => d.width / 2)
         .attr("dy", (_, i) => (i === 0 ? 0 : 16))
         .text((d) => d.line);
+
+    // 9. Attach interaction handlers
+    attachInteractions(nodesSelection, edgesSelection, edges);
 }
 
 function renderError(message) {
@@ -354,4 +356,116 @@ function renderError(message) {
         .style("color", "#b91c1c")
         .style("font-weight", "600")
         .text(message);
+}
+
+function buildReverseEdges(edges) {
+    const reverseEdges = new Map();
+    for (const [from, targets] of edges.entries()) {
+        for (const target of targets) {
+            if (!reverseEdges.has(target)) {
+                reverseEdges.set(target, []);
+            }
+            reverseEdges.get(target).push(from);
+        }
+    }
+    return reverseEdges;
+}
+
+function getImmediateNeighbors(nodeId, edges, reverseEdges) {
+    const connected = new Set([nodeId]);
+
+    const children = edges.get(nodeId) || [];
+    children.forEach(child => connected.add(child));
+
+    const parents = reverseEdges.get(nodeId) || [];
+    parents.forEach(parent => connected.add(parent));
+
+    return connected;
+}
+
+// FIX: Separating downstream vs upstream dependencies to prevent sibling leakage
+function getAllConnected(startId, edges, reverseEdges) {
+    const connected = new Set([startId]);
+
+    // 1. Strict Downstream Chain: find only nodes called directly/indirectly by startId
+    const queueDown = [startId];
+    while (queueDown.length > 0) {
+        const curr = queueDown.shift();
+        const children = edges.get(curr) || [];
+        for (const child of children) {
+            if (!connected.has(child)) {
+                connected.add(child);
+                queueDown.push(child);
+            }
+        }
+    }
+
+    // 2. Strict Upstream Chain: find only nodes that directly/indirectly call startId
+    const queueUp = [startId];
+    while (queueUp.length > 0) {
+        const curr = queueUp.shift();
+        const parents = reverseEdges.get(curr) || [];
+        for (const parent of parents) {
+            if (!connected.has(parent)) {
+                connected.add(parent);
+                queueUp.push(parent); // Traces strictly up to parents without exploring parents' other children
+            }
+        }
+    }
+
+    return connected;
+}
+
+function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
+    const reverseEdgesMap = buildReverseEdges(edgesMap);
+    let activeClickedNodeId = null;
+
+    function updateHighlightState(activeSet) {
+        if (!activeSet) {
+            nodesSelection.style("opacity", 1);
+            edgesSelection.style("opacity", 1);
+            return;
+        }
+
+        nodesSelection.style("opacity", d => activeSet.has(d.id) ? 1 : 0.15);
+
+        // Edge highlighting fix: an edge is only highlighted if it connects nodes
+        // within the explicit linear lineage path.
+        edgesSelection.style("opacity", d =>
+            (activeSet.has(d.fromId) && activeSet.has(d.toId)) ? 1 : 0.05
+        );
+    }
+
+    nodesSelection
+        .style("cursor", "pointer")
+        .on("mouseover", function(event, d) {
+            if (activeClickedNodeId) return;
+            const immediateNeighbors = getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
+            updateHighlightState(immediateNeighbors);
+            d3.select(this).raise();
+        })
+        .on("mouseout", function(event, d) {
+            if (activeClickedNodeId) return;
+            updateHighlightState(null);
+        })
+        .on("click", function(event, d) {
+            if (activeClickedNodeId === d.id) {
+                activeClickedNodeId = null;
+                updateHighlightState(null);
+            } else {
+                activeClickedNodeId = d.id;
+                const allConnected = getAllConnected(d.id, edgesMap, reverseEdgesMap);
+                updateHighlightState(allConnected);
+                d3.select(this).raise();
+            }
+            event.stopPropagation();
+        });
+
+    // Clear click highlights if clicking empty background space on the SVG
+    d3.select("svg").on("click", () => {
+        if (activeClickedNodeId) {
+            activeClickedNodeId = null;
+            updateHighlightState(null);
+        }
+    });
 }
