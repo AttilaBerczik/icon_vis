@@ -471,7 +471,7 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
             updateHighlightState(immediateNeighbors);
             d3.select(this).raise();
         })
-        .on("mouseout", function(event, d) {
+        .on("mouseout", function() {
             if (activeClickedNodeId) return;
             updateHighlightState(null);
         })
