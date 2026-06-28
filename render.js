@@ -1,4 +1,18 @@
+// State management for collapsed components and interactions
+const collapsedFolders = new Set();
+const collapsedFiles = new Set();
+let currentGraphData = null;
+let isInitialRender = true;
+let currentZoomTransform = d3.zoomIdentity;
+
+// NEW: Cache layout order to prevent random shuffling when toggling boxes
+let cachedLayout = null;
+// NEW: Track the clicked element to keep the camera anchored to the mouse
+let targetElementToTrack = null;
+
 function renderGraph(levels, depthById, nodes, edges) {
+    // Save state so we can re-render cleanly on toggles
+    currentGraphData = { levels, depthById, nodes, edges };
     container.selectAll("*").remove();
 
     const nodeData = [];
@@ -8,10 +22,12 @@ function renderGraph(levels, depthById, nodes, edges) {
     const lineHeight = 16;
     const xSpacingBetweenNodes = 30;
     const defaultYSpacing = 160;
-    const minLaneGap = 4; // Guarantees at least 4 pixels of height between orthogonal edge layers
+    const minLaneGap = 4;
     const margin = { top: 60, right: 60, bottom: 60, left: 60 };
 
-    // 1. Process node data and compute individual dimensions per node
+    const COLLAPSED_WIDTH = 16; // The "one wide" internal logic width
+
+    // 1. Process node data
     levels.forEach((levelIds, depth) => {
         levelIds.forEach((id) => {
             const rawLabel = nodes.get(id) || id;
@@ -27,14 +43,9 @@ function renderGraph(levels, depthById, nodes, edges) {
             const calculatedHeight = Math.max(24, lines.length * lineHeight + basePaddingY);
 
             nodeData.push({
-                id,
-                depth,
-                rawLabel,
-                lines,
-                width: calculatedWidth,
-                height: calculatedHeight,
-                folder: labelInfo.folder,
-                file: labelInfo.file,
+                id, depth, rawLabel, lines,
+                width: calculatedWidth, height: calculatedHeight,
+                folder: labelInfo.folder, file: labelInfo.file,
                 fileKey: makeFileKey(labelInfo.folder, labelInfo.file)
             });
         });
@@ -42,12 +53,30 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     const nodeDims = new Map(nodeData.map(d => [d.id, { w: d.width, h: d.height }]));
 
-    const { folderOrder, fileOrderByFolder, fileMetaByKey } = buildFolderFileIndex(levels, nodes);
-    const { folderOrder: orderedFolders, fileOrderByFolder: orderedFilesByFolder, nodeOrderByFileDepth } =
-        optimizeLayout(levels, depthById, nodes, edges, folderOrder, fileOrderByFolder);
-    const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
+    // --- NEW: Layout Caching ---
+    // Only run the randomized optimization on the very first render.
+    let orderedFolders, orderedFilesByFolder, nodeOrderByFileDepth, fileMetaByKey;
 
-    // 2. Compute maximum column widths per file column
+    if (!cachedLayout || isInitialRender) {
+        const { folderOrder: fo, fileOrderByFolder: fof, fileMetaByKey: fmbk } = buildFolderFileIndex(levels, nodes);
+        const optimized = optimizeLayout(levels, depthById, nodes, edges, fo, fof);
+        cachedLayout = {
+            folderOrder: optimized.folderOrder,
+            fileOrderByFolder: optimized.fileOrderByFolder,
+            nodeOrderByFileDepth: optimized.nodeOrderByFileDepth,
+            fileMetaByKey: fmbk
+        };
+    }
+
+    orderedFolders = cachedLayout.folderOrder;
+    orderedFilesByFolder = cachedLayout.fileOrderByFolder;
+    nodeOrderByFileDepth = cachedLayout.nodeOrderByFileDepth;
+    fileMetaByKey = cachedLayout.fileMetaByKey;
+
+    const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
+    // ---------------------------
+
+    // 2. Compute max column widths (ignoring collapsed state initially for base metrics)
     const maxNodesPerLevelByFile = new Map();
     const fileColumnWidths = new Map();
 
@@ -79,16 +108,25 @@ function renderGraph(levels, depthById, nodes, edges) {
         }
     });
 
-    // 3. Calculate file X start boundaries dynamically
+    // 3. Calculate file X start boundaries dynamically incorporating COLLAPSED logic
     const fileStartX = new Map();
     let currentX = margin.left;
+
     orderedFolders.forEach((folder) => {
+        const isFolderCollapsed = collapsedFolders.has(folder);
         const files = orderedFilesByFolder.get(folder) || [];
-        files.forEach((f) => {
-            fileStartX.set(f, currentX);
-            const colWidth = fileColumnWidths.get(f) + 40;
-            currentX += colWidth;
-        });
+
+        if (isFolderCollapsed) {
+            files.forEach(f => fileStartX.set(f, currentX));
+            currentX += COLLAPSED_WIDTH + 40;
+        } else {
+            files.forEach((f) => {
+                fileStartX.set(f, currentX);
+                const isFileCollapsed = collapsedFiles.has(f);
+                const colWidth = isFileCollapsed ? COLLAPSED_WIDTH : (fileColumnWidths.get(f) || 0);
+                currentX += colWidth + 40;
+            });
+        }
     });
 
     const svgWidth = Math.max(900, currentX + margin.right);
@@ -97,34 +135,42 @@ function renderGraph(levels, depthById, nodes, edges) {
     // 4. Pre-calculate strictly X positions first
     levels.forEach((_, depth) => {
         orderedFolders.forEach((folder) => {
+            const isFolderCollapsed = collapsedFolders.has(folder);
             const files = orderedFilesByFolder.get(folder) || [];
+
             files.forEach((f) => {
+                const isFileCollapsed = collapsedFiles.has(f);
                 const depthMap = nodeOrderByFileDepth.get(f);
                 const ids = depthMap ? depthMap.get(depth) : null;
                 if (!ids || ids.length === 0) return;
 
                 const startX = fileStartX.get(f);
-                const totalColWidth = fileColumnWidths.get(f);
-                const colCenter = startX + totalColWidth / 2;
 
-                const K = ids.length;
-                let totalSubsegmentWidth = 0;
-                ids.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
-                totalSubsegmentWidth += (K - 1) * xSpacingBetweenNodes;
+                if (isFolderCollapsed || isFileCollapsed) {
+                    const colCenter = startX + COLLAPSED_WIDTH / 2;
+                    ids.forEach(id => positionsX.set(id, colCenter));
+                } else {
+                    const totalColWidth = fileColumnWidths.get(f);
+                    const colCenter = startX + totalColWidth / 2;
 
-                let segmentStartX = colCenter - totalSubsegmentWidth / 2;
+                    const K = ids.length;
+                    let totalSubsegmentWidth = 0;
+                    ids.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
+                    totalSubsegmentWidth += (K - 1) * xSpacingBetweenNodes;
 
-                ids.forEach((id) => {
-                    const dims = nodeDims.get(id);
-                    const x = segmentStartX + dims.w / 2;
-                    positionsX.set(id, x);
-                    segmentStartX += dims.w + xSpacingBetweenNodes;
-                });
+                    let segmentStartX = colCenter - totalSubsegmentWidth / 2;
+                    ids.forEach((id) => {
+                        const dims = nodeDims.get(id);
+                        const x = segmentStartX + dims.w / 2;
+                        positionsX.set(id, x);
+                        segmentStartX += dims.w + xSpacingBetweenNodes;
+                    });
+                }
             });
         });
     });
 
-    // 5. Generate links and perform Interval Graph Coloring with known X intervals
+    // 5. Generate links and perform Interval Graph Coloring
     const linkData = [];
     const layersEdges = Array.from({ length: MAX_DEPTH }, () => []);
 
@@ -140,11 +186,8 @@ function renderGraph(levels, depthById, nodes, edges) {
             if (targetX === undefined) continue;
 
             const edgeObj = {
-                fromId: from,
-                toId: target,
-                fromDepth: fromDepth,
-                leftX: Math.min(sourceX, targetX),
-                rightX: Math.max(sourceX, targetX),
+                fromId: from, toId: target, fromDepth: fromDepth,
+                leftX: Math.min(sourceX, targetX), rightX: Math.max(sourceX, targetX),
                 lane: 0
             };
             linkData.push(edgeObj);
@@ -154,20 +197,12 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     const maxLanesPerLayer = new Array(MAX_DEPTH).fill(0);
 
-    // Greedy Interval Graph Coloring for Bus Routing (Group by Source Node)
     layersEdges.forEach((layer, depth) => {
         if (layer.length === 0) return;
-
-        // 1. Group edges into buses by fromId
         const buses = new Map();
         layer.forEach((edge) => {
             if (!buses.has(edge.fromId)) {
-                buses.set(edge.fromId, {
-                    fromId: edge.fromId,
-                    leftX: edge.leftX,
-                    rightX: edge.rightX,
-                    edges: []
-                });
+                buses.set(edge.fromId, { fromId: edge.fromId, leftX: edge.leftX, rightX: edge.rightX, edges: [] });
             }
             const bus = buses.get(edge.fromId);
             bus.leftX = Math.min(bus.leftX, edge.leftX);
@@ -178,34 +213,23 @@ function renderGraph(levels, depthById, nodes, edges) {
         const busArray = Array.from(buses.values());
         busArray.sort((a, b) => a.leftX - b.leftX);
 
-        // 2. Assign lanes to buses
         busArray.forEach((bus, index) => {
             const assignedLanes = [];
             for (let i = 0; i < index; i++) {
                 const prev = busArray[i];
-                // Intervals overlap if bounds touch or cross
-                if (Math.max(bus.leftX, prev.leftX) <= Math.min(bus.rightX, prev.rightX)) {
-                    assignedLanes.push(prev.lane);
-                }
+                if (Math.max(bus.leftX, prev.leftX) <= Math.min(bus.rightX, prev.rightX)) assignedLanes.push(prev.lane);
             }
             let lane = 0;
-            while (assignedLanes.includes(lane)) {
-                lane++;
-            }
+            while (assignedLanes.includes(lane)) lane++;
             bus.lane = lane;
-
-            // 3. Apply the shared bus lane to all its edges
-            bus.edges.forEach((edge) => {
-                edge.lane = lane;
-            });
+            bus.edges.forEach((edge) => edge.lane = lane);
         });
 
         maxLanesPerLayer[depth] = Math.max(...busArray.map(b => b.lane)) + 1;
         layer.forEach(edge => edge.totalLanesInLayer = maxLanesPerLayer[depth]);
     });
 
-
-    // 6. Dynamically Calculate Y positions (depths) ensuring minimum height constraint
+    // 6. Calculate Y positions
     const depthY = new Array(levels.length).fill(0);
     let maxIndividualHeight = 24;
     nodeData.forEach(d => { if (d.height > maxIndividualHeight) maxIndividualHeight = d.height; });
@@ -215,7 +239,6 @@ function renderGraph(levels, depthById, nodes, edges) {
     for (let d = 0; d < levels.length - 1; d++) {
         const lanes = maxLanesPerLayer[d] || 1;
         const requiredLaneSpace = lanes * minLaneGap;
-        // Expand the Y spacing dynamically if the required lane space demands it
         const ySpacing = Math.max(defaultYSpacing, maxIndividualHeight + requiredLaneSpace + 80);
         depthY[d + 1] = depthY[d] + ySpacing;
     }
@@ -225,7 +248,6 @@ function renderGraph(levels, depthById, nodes, edges) {
         positions.set(d.id, { x: positionsX.get(d.id), y: depthY[d.depth] });
     });
 
-    // Hydrate link objects with full pos
     linkData.forEach((edge) => {
         edge.source = positions.get(edge.fromId);
         edge.target = positions.get(edge.toId);
@@ -233,128 +255,218 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     const svgHeightComputed = depthY[levels.length - 1] + maxIndividualHeight / 2 + margin.bottom;
 
-    // Determine viewport dimensions to calculate how far to "zoom out" initially
-    const containerNode = container.node();
-    const viewportWidth = containerNode.clientWidth || window.innerWidth - 40;
-    const viewportHeight = containerNode.clientHeight || 600;
+    // 7. Calculate precise Layout Boundaries
+    const folderY = new Map();
+    const fileY = new Map();
 
-    const svg = container
-        .append("svg")
-        .attr("width", "100%")
-        .attr("height", "100%"); // Let the SVG fill the new 80vh CSS container
-
-    // CRITICAL: We wrap EVERYTHING inside this main group.
-    // When the user zooms, we will scale and translate this single group.
-    const mainGroup = svg.append("g").attr("class", "main-zoom-group");
-
-    // 7. Compute accurate bounding boxes using exact positions
-    const fileBoxes = new Map();
-    fileOrder.forEach((f) => {
-        fileBoxes.set(f, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, active: false });
-    });
-    const folderBoxes = new Map();
-    orderedFolders.forEach((folder) => {
-        folderBoxes.set(folder, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, active: false });
-    });
+    orderedFolders.forEach(folder => folderY.set(folder, { minY: Infinity, maxY: -Infinity }));
+    fileOrder.forEach(f => fileY.set(f, { minY: Infinity, maxY: -Infinity }));
 
     nodeData.forEach((d) => {
         const pos = positions.get(d.id);
-        const fileBox = fileBoxes.get(d.fileKey);
-        if (fileBox) {
-            fileBox.active = true;
-            fileBox.minX = Math.min(fileBox.minX, pos.x - d.width / 2);
-            fileBox.maxX = Math.max(fileBox.maxX, pos.x + d.width / 2);
-            fileBox.minY = Math.min(fileBox.minY, pos.y - d.height / 2);
-            fileBox.maxY = Math.max(fileBox.maxY, pos.y + d.height / 2);
+        const fBox = folderY.get(d.folder);
+        if (fBox) {
+            fBox.minY = Math.min(fBox.minY, pos.y - d.height / 2);
+            fBox.maxY = Math.max(fBox.maxY, pos.y + d.height / 2);
         }
-
-        const folderBox = folderBoxes.get(d.folder);
-        if (folderBox) {
-            folderBox.active = true;
-            folderBox.minX = Math.min(folderBox.minX, pos.x - d.width / 2);
-            folderBox.maxX = Math.max(folderBox.maxX, pos.x + d.width / 2);
-            folderBox.minY = Math.min(folderBox.minY, pos.y - d.height / 2);
-            folderBox.maxY = Math.max(folderBox.maxY, pos.y + d.height / 2);
+        const fiBox = fileY.get(d.fileKey);
+        if (fiBox) {
+            fiBox.minY = Math.min(fiBox.minY, pos.y - d.height / 2);
+            fiBox.maxY = Math.max(fiBox.maxY, pos.y + d.height / 2);
         }
     });
 
     const boxPadding = 20;
-    const fileBoxData = [];
-    const folderBoxData = [];
     const fileColorScale = d3.scaleOrdinal(d3.schemeCategory10);
     const folderColorScale = d3.scaleOrdinal(d3.schemeSet3);
+    const folderBoxData = [];
+    const fileBoxData = [];
 
     orderedFolders.forEach((folder, i) => {
-        const box = folderBoxes.get(folder);
-        if (box.active) {
-            folderBoxData.push({
-                folder, x: box.minX - boxPadding, y: box.minY - boxPadding,
-                width: box.maxX - box.minX + 2 * boxPadding, height: box.maxY - box.minY + 2 * boxPadding,
-                color: folderColorScale(i)
-            });
-        }
+        const files = orderedFilesByFolder.get(folder) || [];
+        if (files.length === 0) return;
+        const yRange = folderY.get(folder);
+        if (yRange.minY === Infinity) return;
+
+        const isCollapsed = collapsedFolders.has(folder);
+        const minX = fileStartX.get(files[0]);
+        const lastFile = files[files.length - 1];
+        const lastFileWidth = isCollapsed ? COLLAPSED_WIDTH : (collapsedFiles.has(lastFile) ? COLLAPSED_WIDTH : fileColumnWidths.get(lastFile));
+        const maxX = fileStartX.get(lastFile) + lastFileWidth;
+
+        folderBoxData.push({
+            folder,
+            x: minX - boxPadding,
+            y: yRange.minY - 40,
+            width: maxX - minX + 2 * boxPadding,
+            height: yRange.maxY - yRange.minY + 60,
+            color: folderColorScale(i),
+            collapsed: isCollapsed
+        });
     });
 
     fileOrder.forEach((f, i) => {
-        const box = fileBoxes.get(f);
-        if (box.active) {
-            const meta = fileMetaByKey.get(f);
-            const label = meta && meta.file ? meta.file : f;
-            fileBoxData.push({
-                file: f, label, x: box.minX - boxPadding, y: box.minY - boxPadding,
-                width: box.maxX - box.minX + 2 * boxPadding, height: box.maxY - box.minY + 2 * boxPadding,
-                color: fileColorScale(i)
+        const meta = fileMetaByKey.get(f);
+        if (!meta) return;
+        const yRange = fileY.get(f);
+        if (yRange.minY === Infinity) return;
+
+        // Hide file boxes completely if parent folder is collapsed
+        if (collapsedFolders.has(meta.folder)) return;
+
+        const isCollapsed = collapsedFiles.has(f);
+        const minX = fileStartX.get(f);
+        const widthX = isCollapsed ? COLLAPSED_WIDTH : fileColumnWidths.get(f);
+        const maxX = minX + widthX;
+        const label = meta.file ? meta.file : f;
+
+        fileBoxData.push({
+            file: f, label,
+            x: minX - boxPadding,
+            y: yRange.minY - 20,
+            width: maxX - minX + 2 * boxPadding,
+            height: yRange.maxY - yRange.minY + 40,
+            color: fileColorScale(i),
+            collapsed: isCollapsed
+        });
+    });
+
+    // --- NEW: Camera Target Compensation ---
+    // Calculate how far the clicked box moved in SVG coordinates,
+    // and seamlessly translate the camera to perfectly match it.
+    if (targetElementToTrack) {
+        let newX, newY;
+        if (targetElementToTrack.type === 'folder') {
+            const box = folderBoxData.find(b => b.folder === targetElementToTrack.id);
+            if (box) { newX = box.x; newY = box.y; }
+        } else if (targetElementToTrack.type === 'file') {
+            const box = fileBoxData.find(b => b.file === targetElementToTrack.id);
+            if (box) { newX = box.x; newY = box.y; }
+        }
+
+        if (newX !== undefined && newY !== undefined) {
+            currentZoomTransform = currentZoomTransform.translate(
+                targetElementToTrack.oldX - newX,
+                targetElementToTrack.oldY - newY
+            );
+        }
+        targetElementToTrack = null; // Clear the track target
+    }
+
+    // 8. Generate Edge Clipping Bounds Map
+    const nodeContainerBounds = new Map();
+    nodeData.forEach(d => nodeContainerBounds.set(d.id, { isCollapsed: false, leftX: 0, rightX: 0 }));
+
+    folderBoxData.forEach(box => {
+        if (box.collapsed) {
+            nodeData.forEach(d => {
+                if (d.folder === box.folder) nodeContainerBounds.set(d.id, { isCollapsed: true, leftX: box.x, rightX: box.x + box.width });
             });
         }
     });
 
-    // Render folder boxes
+    fileBoxData.forEach(box => {
+        if (box.collapsed && !collapsedFolders.has(fileMetaByKey.get(box.file).folder)) {
+            nodeData.forEach(d => {
+                if (d.fileKey === box.file) nodeContainerBounds.set(d.id, { isCollapsed: true, leftX: box.x, rightX: box.x + box.width });
+            });
+        }
+    });
+
+    const containerNode = container.node();
+    const viewportWidth = containerNode.clientWidth || window.innerWidth - 40;
+    const viewportHeight = containerNode.clientHeight || 600;
+
+    const svg = container.append("svg").attr("width", "100%").attr("height", "100%");
+    const mainGroup = svg.append("g").attr("class", "main-zoom-group");
+
+    // Drawing Groups Order
     const folderBoxesGroup = mainGroup.append("g").attr("class", "folder-bounding-boxes");
-    folderBoxesGroup.selectAll("rect")
-        .data(folderBoxData).enter().append("rect")
-        .attr("x", (d) => d.x).attr("y", (d) => d.y)
-        .attr("width", (d) => d.width).attr("height", (d) => d.height)
-        .attr("fill", (d) => d.color).attr("fill-opacity", 0.05)
-        .attr("stroke", (d) => d.color).attr("stroke-width", 2)
-        .attr("stroke-dasharray", "8,4").attr("rx", 12);
-
-    folderBoxesGroup.selectAll("text.folder-box-label")
-        .data(folderBoxData).enter().append("text")
-        .attr("class", "folder-box-label").attr("x", (d) => d.x + 10).attr("y", (d) => d.y + 20)
-        .attr("fill", (d) => d.color).style("font-weight", "bold").style("font-size", "14px").text((d) => d.folder);
-
-    // Render file boxes
     const fileBoxesGroup = mainGroup.append("g").attr("class", "file-bounding-boxes");
-    fileBoxesGroup.selectAll("rect")
-        .data(fileBoxData).enter().append("rect")
-        .attr("x", (d) => d.x).attr("y", (d) => d.y)
-        .attr("width", (d) => d.width).attr("height", (d) => d.height)
-        .attr("fill", (d) => d.color).attr("fill-opacity", 0.08)
-        .attr("stroke", (d) => d.color).attr("stroke-width", 2)
-        .attr("stroke-dasharray", "5,5").attr("rx", 10);
-
-    fileBoxesGroup.selectAll("text.file-box-label")
-        .data(fileBoxData).enter().append("text")
-        .attr("class", "file-box-label").attr("x", (d) => d.x + 10).attr("y", (d) => d.y + 34)
-        .attr("fill", (d) => d.color).style("font-weight", "bold").style("font-size", "12px").text((d) => d.label);
-
-    // Render baseline depth dividers
     mainGroup.append("g").attr("class", "level-lines")
-        .selectAll("line")
-        .data(levels).enter().append("line")
+        .selectAll("line").data(levels).enter().append("line")
         .attr("x1", margin.left).attr("x2", svgWidth - margin.right)
         .attr("y1", (_, depth) => depthY[depth]).attr("y2", (_, depth) => depthY[depth])
         .attr("stroke", "#e2e8f0").attr("stroke-width", 1);
-
-    // 8. Render paths dynamically using computed intervals
     const edgesGroup = mainGroup.append("g").attr("class", "edges");
 
-    const edgesSelection = edgesGroup.selectAll("path")
-        .data(linkData).enter().append("path")
+    // --- Render Folders ---
+    const folderRects = folderBoxesGroup.selectAll("g.folder-box").data(folderBoxData).enter().append("g").attr("class", "folder-box");
+    folderRects.append("rect")
+        .attr("x", d => d.x).attr("y", d => d.y)
+        .attr("width", d => d.width).attr("height", d => d.height)
+        .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.05)
+        .attr("stroke", d => d.color).attr("stroke-width", 2)
+        .attr("stroke-dasharray", "8,4").attr("rx", 12);
+
+    const folderToggles = folderRects.append("g")
+        .style("cursor", "pointer")
+        .on("click", (event, d) => {
+            event.stopPropagation();
+            if (collapsedFolders.has(d.folder)) collapsedFolders.delete(d.folder);
+            else collapsedFolders.add(d.folder);
+
+            // Mark this specific box's coordinates to anchor the camera against
+            targetElementToTrack = { type: 'folder', id: d.folder, oldX: d.x, oldY: d.y };
+            renderGraph(currentGraphData.levels, currentGraphData.depthById, currentGraphData.nodes, currentGraphData.edges);
+        });
+
+    folderToggles.append("rect")
+        .attr("x", d => d.x + 5).attr("y", d => d.y + 5).attr("width", 16).attr("height", 16)
+        .attr("fill", "#fff").attr("stroke", d => d.color).attr("rx", 3);
+    folderToggles.append("text")
+        .attr("x", d => d.x + 13).attr("y", d => d.y + 17).attr("text-anchor", "middle")
+        .style("font-size", "14px").style("font-weight", "bold").attr("fill", d => d.color)
+        .text(d => d.collapsed ? "+" : "-");
+
+    folderRects.append("text")
+        .attr("class", "folder-box-label")
+        .attr("x", d => d.x + 28).attr("y", d => d.y + 18)
+        .attr("fill", d => d.color).style("font-weight", "bold").style("font-size", "14px")
+        .text(d => d.collapsed ? d.folder.substring(0, 3) + ".." : d.folder)
+        .append("title").text(d => d.folder);
+
+    // --- Render Files ---
+    const fileRects = fileBoxesGroup.selectAll("g.file-box").data(fileBoxData).enter().append("g").attr("class", "file-box");
+    fileRects.append("rect")
+        .attr("x", d => d.x).attr("y", d => d.y)
+        .attr("width", d => d.width).attr("height", d => d.height)
+        .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.08)
+        .attr("stroke", d => d.color).attr("stroke-width", 2)
+        .attr("stroke-dasharray", "5,5").attr("rx", 10);
+
+    const fileToggles = fileRects.append("g")
+        .style("cursor", "pointer")
+        .on("click", (event, d) => {
+            event.stopPropagation();
+            if (collapsedFiles.has(d.file)) collapsedFiles.delete(d.file);
+            else collapsedFiles.add(d.file);
+
+            // Mark this specific box's coordinates to anchor the camera against
+            targetElementToTrack = { type: 'file', id: d.file, oldX: d.x, oldY: d.y };
+            renderGraph(currentGraphData.levels, currentGraphData.depthById, currentGraphData.nodes, currentGraphData.edges);
+        });
+
+    fileToggles.append("rect")
+        .attr("x", d => d.x + 5).attr("y", d => d.y + 5).attr("width", 14).attr("height", 14)
+        .attr("fill", "#fff").attr("stroke", d => d.color).attr("rx", 3);
+    fileToggles.append("text")
+        .attr("x", d => d.x + 12).attr("y", d => d.y + 16).attr("text-anchor", "middle")
+        .style("font-size", "12px").style("font-weight", "bold").attr("fill", d => d.color)
+        .text(d => d.collapsed ? "+" : "-");
+
+    fileRects.append("text")
+        .attr("class", "file-box-label")
+        .attr("x", d => d.x + 25).attr("y", d => d.y + 16)
+        .attr("fill", d => d.color).style("font-weight", "bold").style("font-size", "12px")
+        .text(d => d.collapsed ? d.label.substring(0, 3) + ".." : d.label)
+        .append("title").text(d => d.label);
+
+    // --- Render Edges ---
+    const edgesSelection = edgesGroup.selectAll("path").data(linkData).enter().append("path")
         .attr("fill", "none").attr("stroke", "#94a3b8").attr("stroke-width", 1)
         .attr("d", (d) => buildPathLine(d, nodeDims, document.getElementById("toggle-orthogonal")?.checked));
 
-    // Expose layout update context securely for checkboxes
     container.node().updateEdgeRouting = function() {
         const isOrthogonal = document.getElementById("toggle-orthogonal")?.checked;
         edgesSelection.attr("d", (d) => buildPathLine(d, nodeDims, isOrthogonal));
@@ -364,100 +476,101 @@ function renderGraph(levels, depthById, nodes, edges) {
         const hFrom = nodeDims.get(d.fromId).h;
         const hTo = nodeDims.get(d.toId).h;
 
-        const startX = d.source.x;
-        const startY = d.source.y + (hFrom / 2);
-        const endX = d.target.x;
-        const endY = d.target.y - (hTo / 2);
+        let startX = d.source.x;
+        let startY = d.source.y + (hFrom / 2);
+        let endX = d.target.x;
+        let endY = d.target.y - (hTo / 2);
+
+        const srcBounds = nodeContainerBounds.get(d.fromId);
+        const tgtBounds = nodeContainerBounds.get(d.toId);
+
+        if (srcBounds.isCollapsed) {
+            if (d.target.x > d.source.x) startX = srcBounds.rightX;
+            else if (d.target.x < d.source.x) startX = srcBounds.leftX;
+        }
+
+        if (tgtBounds.isCollapsed) {
+            if (d.source.x > d.target.x) endX = tgtBounds.rightX;
+            else if (d.source.x < d.target.x) endX = tgtBounds.leftX;
+        }
 
         if (!useOrthogonal) {
             return `M ${startX} ${startY} L ${endX} ${endY}`;
         } else {
-            // Using maxIndividualHeight (from outer scope) instead of hTo ensures
-            // turnY is perfectly identical for all edges in the same bus, while
-            // safely clearing the top of the tallest target node in the layer.
             const verticalGap = (d.target.y - d.source.y) - (hFrom / 2) - (maxIndividualHeight / 2);
             const laneCount = d.totalLanesInLayer || 1;
-
-            // Calculate lane proportionally
             const laneOffset = ((d.lane + 1) / (laneCount + 1)) * verticalGap;
-            const turnY = startY + laneOffset;
+            const turnY = d.source.y + (hFrom / 2) + laneOffset;
 
-            // The exact overlapping paths create the visual "bus", dropping only at endX
             return `M ${startX} ${startY} L ${startX} ${turnY} L ${endX} ${turnY} L ${endX} ${endY}`;
         }
     }
-    // 9. Render nodes
-    const nodesSelection = mainGroup
-        .append("g").attr("class", "nodes")
-        .selectAll("g")
-        .data(nodeData).enter().append("g")
+
+    // --- Render Visible Nodes Only ---
+    const visibleNodeData = nodeData.filter(d =>
+        !collapsedFolders.has(d.folder) && !collapsedFiles.has(d.fileKey)
+    );
+
+    const nodesSelection = mainGroup.append("g").attr("class", "nodes")
+        .selectAll("g").data(visibleNodeData).enter().append("g")
         .attr("transform", (d) => {
             const position = positions.get(d.id);
             return `translate(${position.x - d.width / 2}, ${position.y - d.height / 2})`;
         });
 
     nodesSelection.append("rect")
-        .attr("width", (d) => d.width).attr("height", (d) => d.height)
-        .attr("rx", 6).attr("fill", (d) => (d.depth === 0 ? "#2563eb" : "#e2e8f0"))
+        .attr("width", d => d.width).attr("height", d => d.height)
+        .attr("rx", 6).attr("fill", d => (d.depth === 0 ? "#2563eb" : "#e2e8f0"))
         .attr("stroke", "#94a3b8");
 
     nodesSelection.append("text")
-        .attr("x", (d) => d.width / 2)
-        .attr("y", (d) => d.height / 2 - (d.lines.length - 1) * 8)
-        .attr("text-anchor", "middle")
-        .attr("font-size", "12px")
-        .attr("fill", (d) => (d.depth === 0 ? "#f8fafc" : "#1f2937"))
+        .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
+        .attr("text-anchor", "middle").attr("font-size", "12px").attr("fill", d => (d.depth === 0 ? "#f8fafc" : "#1f2937"))
         .selectAll("tspan")
-        .data((d) => d.lines.map(line => ({ line, width: d.width, lineCount: d.lines.length })))
+        .data(d => d.lines.map(line => ({ line, width: d.width, lineCount: d.lines.length })))
         .enter().append("tspan")
-        .attr("x", (d) => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
-        .text((d) => d.line);
+        .attr("x", d => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
+        .text(d => d.line);
 
-    // 10. Add D3 Zoom and Pan behavior
+    // --- Interaction Attachments & Zoom ---
     const zoom = d3.zoom()
-        .scaleExtent([0.05, 5]) // Allow zooming out to 5% and zooming in up to 500%
+        .scaleExtent([0.05, 5])
         .on("zoom", (event) => {
-            // Apply the matrix transform (scale/translate) to our main wrapper group
+            currentZoomTransform = event.transform;
             mainGroup.attr("transform", event.transform);
         });
 
-    // Attach the listener to the parent SVG
     svg.call(zoom);
 
-    // --- Calculate the "Start Zoomed Out" view ---
-    const paddingFit = 40; // padding inside the viewport
-    const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
-    const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+    if (isInitialRender) {
+        const paddingFit = 40;
+        const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
+        const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+        const initialScale = Math.min(scaleX, scaleY, 1);
+        const tx = (viewportWidth - svgWidth * initialScale) / 2;
+        const ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
 
-    // Pick the smallest scale so both width and height fit on screen.
-    // Cap at 1.0 so we don't accidentally zoom in massively on tiny graphs.
-    const initialScale = Math.min(scaleX, scaleY, 1);
+        currentZoomTransform = d3.zoomIdentity.translate(tx, ty).scale(initialScale);
+        isInitialRender = false;
+    }
 
-    // Center the graph horizontally and vertically
-    const tx = (viewportWidth - svgWidth * initialScale) / 2;
-    const ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
-
-    // Apply the initial computed state instantly
-    svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(initialScale));
+    // Apply the saved or actively compensated zoom seamlessly
+    svg.call(zoom.transform, currentZoomTransform);
+    mainGroup.attr("transform", currentZoomTransform);
 
     attachInteractions(nodesSelection, edgesSelection, edges);
 }
+
 function renderError(message) {
     container.selectAll("*").remove();
-    container
-        .append("div")
-        .style("color", "#b91c1c")
-        .style("font-weight", "600")
-        .text(message);
+    container.append("div").style("color", "#b91c1c").style("font-weight", "600").text(message);
 }
 
 function buildReverseEdges(edges) {
     const reverseEdges = new Map();
     for (const [from, targets] of edges.entries()) {
         for (const target of targets) {
-            if (!reverseEdges.has(target)) {
-                reverseEdges.set(target, []);
-            }
+            if (!reverseEdges.has(target)) reverseEdges.set(target, []);
             reverseEdges.get(target).push(from);
         }
     }
@@ -466,21 +579,16 @@ function buildReverseEdges(edges) {
 
 function getImmediateNeighbors(nodeId, edges, reverseEdges) {
     const connected = new Set([nodeId]);
-
     const children = edges.get(nodeId) || [];
     children.forEach(child => connected.add(child));
-
     const parents = reverseEdges.get(nodeId) || [];
     parents.forEach(parent => connected.add(parent));
-
     return connected;
 }
 
-// FIX: Separating downstream vs upstream dependencies to prevent sibling leakage
 function getAllConnected(startId, edges, reverseEdges) {
     const connected = new Set([startId]);
 
-    // 1. Strict Downstream Chain: find only nodes called directly/indirectly by startId
     const queueDown = [startId];
     while (queueDown.length > 0) {
         const curr = queueDown.shift();
@@ -493,7 +601,6 @@ function getAllConnected(startId, edges, reverseEdges) {
         }
     }
 
-    // 2. Strict Upstream Chain: find only nodes that directly/indirectly call startId
     const queueUp = [startId];
     while (queueUp.length > 0) {
         const curr = queueUp.shift();
@@ -501,7 +608,7 @@ function getAllConnected(startId, edges, reverseEdges) {
         for (const parent of parents) {
             if (!connected.has(parent)) {
                 connected.add(parent);
-                queueUp.push(parent); // Traces strictly up to parents without exploring parents' other children
+                queueUp.push(parent);
             }
         }
     }
@@ -521,15 +628,9 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
         }
 
         nodesSelection.style("opacity", d => activeSet.has(d.id) ? 1 : 0.15);
-
-        // Edge highlighting fix: an edge is only highlighted if it connects nodes
-        // within the explicit linear lineage path.
-        edgesSelection.style("opacity", d =>
-            (activeSet.has(d.fromId) && activeSet.has(d.toId)) ? 1 : 0.05
-        );
+        edgesSelection.style("opacity", d => (activeSet.has(d.fromId) && activeSet.has(d.toId)) ? 1 : 0.05);
     }
 
-    // --- Node Interactions ---
     nodesSelection
         .style("cursor", "pointer")
         .on("mouseover", function(event, d) {
@@ -555,34 +656,23 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
             event.stopPropagation();
         });
 
-    // --- Edge Interactions (UPDATED FOR BUS STACKING) ---
     edgesSelection
         .style("cursor", "crosshair")
         .attr("stroke-width", 2)
         .on("mouseover", function(event, d) {
             if (activeClickedNodeId) return;
-
-            // 1. Initialize the active set with the shared source node
             const activeSet = new Set([d.fromId]);
-
-            // 2. Add ALL target nodes that share this exact source node
-            // This ensures every edge in the visual "stack" or "bus" gets highlighted.
             const siblings = edgesMap.get(d.fromId) || [];
-            siblings.forEach(targetId => {
-                activeSet.add(targetId);
-            });
+            siblings.forEach(targetId => activeSet.add(targetId));
 
             updateHighlightState(activeSet);
-
-            // 3. Raise ALL edges in this stack to the front so they aren't obscured
             edgesSelection.filter(e => e.fromId === d.fromId).raise();
         })
         .on("mouseout", function() {
             if (activeClickedNodeId) return;
             updateHighlightState(null);
         });
-    // --- Background Interactions ---
-    // Clear click highlights if clicking empty background space on the SVG
+
     d3.select("svg").on("click", () => {
         if (activeClickedNodeId) {
             activeClickedNodeId = null;
