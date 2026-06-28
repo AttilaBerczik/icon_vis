@@ -231,12 +231,21 @@ function renderGraph(levels, depthById, nodes, edges) {
         edge.target = positions.get(edge.toId);
     });
 
-    const svgHeight = depthY[levels.length - 1] + maxIndividualHeight / 2 + margin.bottom;
+    const svgHeightComputed = depthY[levels.length - 1] + maxIndividualHeight / 2 + margin.bottom;
+
+    // Determine viewport dimensions to calculate how far to "zoom out" initially
+    const containerNode = container.node();
+    const viewportWidth = containerNode.clientWidth || window.innerWidth - 40;
+    const viewportHeight = containerNode.clientHeight || 600;
 
     const svg = container
         .append("svg")
-        .attr("width", svgWidth)
-        .attr("height", svgHeight);
+        .attr("width", "100%")
+        .attr("height", "100%"); // Let the SVG fill the new 80vh CSS container
+
+    // CRITICAL: We wrap EVERYTHING inside this main group.
+    // When the user zooms, we will scale and translate this single group.
+    const mainGroup = svg.append("g").attr("class", "main-zoom-group");
 
     // 7. Compute accurate bounding boxes using exact positions
     const fileBoxes = new Map();
@@ -300,7 +309,7 @@ function renderGraph(levels, depthById, nodes, edges) {
     });
 
     // Render folder boxes
-    const folderBoxesGroup = svg.append("g").attr("class", "folder-bounding-boxes");
+    const folderBoxesGroup = mainGroup.append("g").attr("class", "folder-bounding-boxes");
     folderBoxesGroup.selectAll("rect")
         .data(folderBoxData).enter().append("rect")
         .attr("x", (d) => d.x).attr("y", (d) => d.y)
@@ -315,7 +324,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("fill", (d) => d.color).style("font-weight", "bold").style("font-size", "14px").text((d) => d.folder);
 
     // Render file boxes
-    const fileBoxesGroup = svg.append("g").attr("class", "file-bounding-boxes");
+    const fileBoxesGroup = mainGroup.append("g").attr("class", "file-bounding-boxes");
     fileBoxesGroup.selectAll("rect")
         .data(fileBoxData).enter().append("rect")
         .attr("x", (d) => d.x).attr("y", (d) => d.y)
@@ -330,7 +339,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("fill", (d) => d.color).style("font-weight", "bold").style("font-size", "12px").text((d) => d.label);
 
     // Render baseline depth dividers
-    svg.append("g").attr("class", "level-lines")
+    mainGroup.append("g").attr("class", "level-lines")
         .selectAll("line")
         .data(levels).enter().append("line")
         .attr("x1", margin.left).attr("x2", svgWidth - margin.right)
@@ -338,7 +347,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         .attr("stroke", "#e2e8f0").attr("stroke-width", 1);
 
     // 8. Render paths dynamically using computed intervals
-    const edgesGroup = svg.append("g").attr("class", "edges");
+    const edgesGroup = mainGroup.append("g").attr("class", "edges");
 
     const edgesSelection = edgesGroup.selectAll("path")
         .data(linkData).enter().append("path")
@@ -378,7 +387,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         }
     }
     // 9. Render nodes
-    const nodesSelection = svg
+    const nodesSelection = mainGroup
         .append("g").attr("class", "nodes")
         .selectAll("g")
         .data(nodeData).enter().append("g")
@@ -403,6 +412,33 @@ function renderGraph(levels, depthById, nodes, edges) {
         .enter().append("tspan")
         .attr("x", (d) => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
         .text((d) => d.line);
+
+    // 10. Add D3 Zoom and Pan behavior
+    const zoom = d3.zoom()
+        .scaleExtent([0.05, 5]) // Allow zooming out to 5% and zooming in up to 500%
+        .on("zoom", (event) => {
+            // Apply the matrix transform (scale/translate) to our main wrapper group
+            mainGroup.attr("transform", event.transform);
+        });
+
+    // Attach the listener to the parent SVG
+    svg.call(zoom);
+
+    // --- Calculate the "Start Zoomed Out" view ---
+    const paddingFit = 40; // padding inside the viewport
+    const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
+    const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+
+    // Pick the smallest scale so both width and height fit on screen.
+    // Cap at 1.0 so we don't accidentally zoom in massively on tiny graphs.
+    const initialScale = Math.min(scaleX, scaleY, 1);
+
+    // Center the graph horizontally and vertically
+    const tx = (viewportWidth - svgWidth * initialScale) / 2;
+    const ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
+
+    // Apply the initial computed state instantly
+    svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(initialScale));
 
     attachInteractions(nodesSelection, edgesSelection, edges);
 }
