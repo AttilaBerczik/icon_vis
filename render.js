@@ -519,26 +519,32 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
             event.stopPropagation();
         });
 
-    // --- Edge Interactions (NEW) ---
+    // --- Edge Interactions (UPDATED FOR BUS STACKING) ---
     edgesSelection
-        .style("cursor", "crosshair") // Optional: differentiates from node hover pointer
-        .attr("stroke-width", 2) // Optional: slightly thicker makes hovering easier
+        .style("cursor", "crosshair")
+        .attr("stroke-width", 2)
         .on("mouseover", function(event, d) {
-            // Respect click lock just like nodes do
             if (activeClickedNodeId) return;
 
-            // Highlight only the specific edge's source and target nodes
-            const activeSet = new Set([d.fromId, d.toId]);
+            // 1. Initialize the active set with the shared source node
+            const activeSet = new Set([d.fromId]);
+
+            // 2. Add ALL target nodes that share this exact source node
+            // This ensures every edge in the visual "stack" or "bus" gets highlighted.
+            const siblings = edgesMap.get(d.fromId) || [];
+            siblings.forEach(targetId => {
+                activeSet.add(targetId);
+            });
+
             updateHighlightState(activeSet);
 
-            // Bring the hovered edge to the front of the edges group
-            d3.select(this).raise();
+            // 3. Raise ALL edges in this stack to the front so they aren't obscured
+            edgesSelection.filter(e => e.fromId === d.fromId).raise();
         })
         .on("mouseout", function() {
             if (activeClickedNodeId) return;
             updateHighlightState(null);
         });
-
     // --- Background Interactions ---
     // Clear click highlights if clicking empty background space on the SVG
     d3.select("svg").on("click", () => {
