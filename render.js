@@ -154,17 +154,37 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     const maxLanesPerLayer = new Array(MAX_DEPTH).fill(0);
 
-    // Greedy Interval Graph Coloring
+    // Greedy Interval Graph Coloring for Bus Routing (Group by Source Node)
     layersEdges.forEach((layer, depth) => {
         if (layer.length === 0) return;
-        layer.sort((a, b) => a.leftX - b.leftX);
 
-        layer.forEach((edge, index) => {
+        // 1. Group edges into buses by fromId
+        const buses = new Map();
+        layer.forEach((edge) => {
+            if (!buses.has(edge.fromId)) {
+                buses.set(edge.fromId, {
+                    fromId: edge.fromId,
+                    leftX: edge.leftX,
+                    rightX: edge.rightX,
+                    edges: []
+                });
+            }
+            const bus = buses.get(edge.fromId);
+            bus.leftX = Math.min(bus.leftX, edge.leftX);
+            bus.rightX = Math.max(bus.rightX, edge.rightX);
+            bus.edges.push(edge);
+        });
+
+        const busArray = Array.from(buses.values());
+        busArray.sort((a, b) => a.leftX - b.leftX);
+
+        // 2. Assign lanes to buses
+        busArray.forEach((bus, index) => {
             const assignedLanes = [];
             for (let i = 0; i < index; i++) {
-                const prev = layer[i];
-                // Intervals overlap visually if bounds touch or cross
-                if (Math.max(edge.leftX, prev.leftX) <= Math.min(edge.rightX, prev.rightX)) {
+                const prev = busArray[i];
+                // Intervals overlap if bounds touch or cross
+                if (Math.max(bus.leftX, prev.leftX) <= Math.min(bus.rightX, prev.rightX)) {
                     assignedLanes.push(prev.lane);
                 }
             }
@@ -172,12 +192,18 @@ function renderGraph(levels, depthById, nodes, edges) {
             while (assignedLanes.includes(lane)) {
                 lane++;
             }
-            edge.lane = lane;
+            bus.lane = lane;
+
+            // 3. Apply the shared bus lane to all its edges
+            bus.edges.forEach((edge) => {
+                edge.lane = lane;
+            });
         });
 
-        maxLanesPerLayer[depth] = Math.max(...layer.map(e => e.lane)) + 1;
+        maxLanesPerLayer[depth] = Math.max(...busArray.map(b => b.lane)) + 1;
         layer.forEach(edge => edge.totalLanesInLayer = maxLanesPerLayer[depth]);
     });
+
 
     // 6. Dynamically Calculate Y positions (depths) ensuring minimum height constraint
     const depthY = new Array(levels.length).fill(0);
@@ -337,16 +363,20 @@ function renderGraph(levels, depthById, nodes, edges) {
         if (!useOrthogonal) {
             return `M ${startX} ${startY} L ${endX} ${endY}`;
         } else {
-            const verticalGap = (d.target.y - d.source.y) - (hFrom / 2) - (hTo / 2);
+            // Using maxIndividualHeight (from outer scope) instead of hTo ensures
+            // turnY is perfectly identical for all edges in the same bus, while
+            // safely clearing the top of the tallest target node in the layer.
+            const verticalGap = (d.target.y - d.source.y) - (hFrom / 2) - (maxIndividualHeight / 2);
             const laneCount = d.totalLanesInLayer || 1;
-            // Distribute lanes proportionally but guarantee standard height minimum
+
+            // Calculate lane proportionally
             const laneOffset = ((d.lane + 1) / (laneCount + 1)) * verticalGap;
             const turnY = startY + laneOffset;
 
+            // The exact overlapping paths create the visual "bus", dropping only at endX
             return `M ${startX} ${startY} L ${startX} ${turnY} L ${endX} ${turnY} L ${endX} ${endY}`;
         }
     }
-
     // 9. Render nodes
     const nodesSelection = svg
         .append("g").attr("class", "nodes")
@@ -463,6 +493,7 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
         );
     }
 
+    // --- Node Interactions ---
     nodesSelection
         .style("cursor", "pointer")
         .on("mouseover", function(event, d) {
@@ -488,6 +519,27 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
             event.stopPropagation();
         });
 
+    // --- Edge Interactions (NEW) ---
+    edgesSelection
+        .style("cursor", "crosshair") // Optional: differentiates from node hover pointer
+        .attr("stroke-width", 2) // Optional: slightly thicker makes hovering easier
+        .on("mouseover", function(event, d) {
+            // Respect click lock just like nodes do
+            if (activeClickedNodeId) return;
+
+            // Highlight only the specific edge's source and target nodes
+            const activeSet = new Set([d.fromId, d.toId]);
+            updateHighlightState(activeSet);
+
+            // Bring the hovered edge to the front of the edges group
+            d3.select(this).raise();
+        })
+        .on("mouseout", function() {
+            if (activeClickedNodeId) return;
+            updateHighlightState(null);
+        });
+
+    // --- Background Interactions ---
     // Clear click highlights if clicking empty background space on the SVG
     d3.select("svg").on("click", () => {
         if (activeClickedNodeId) {
