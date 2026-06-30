@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Call Graph Adjacency Matrix</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="container">
+    <div id="header">
+        <h2>Call Graph Adjacency Matrix</h2>
+        <div class="controls">
+            <label for="order">Sort Matrix By: </label>
+            <select id="order">
+                <option value="name">by Name</option>
+                <option value="count">by Frequency</option>
+                <option value="group">by Cluster (Basic)</option>
+                <option value="tsp">by TSP (Moran's I)</option>
+                <option value="rcm">by RCM (Reverse Cuthill-McKee)</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="matrix-wrapper">
+        <svg id="matrix-svg"></svg>
+    </div>
+</div>
+
+<div id="tooltip" class="tooltip" style="opacity: 0;"></div>
+
+<script src="parser.js"></script>
+<script src="matrix.js"></script>
+</body>
+</html>
