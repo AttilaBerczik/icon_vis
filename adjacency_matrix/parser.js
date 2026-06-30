@@ -34,7 +34,7 @@ async function loadAndParseDot(url) {
 
     // 2. Detect all Nodes and their Attributes (e.g., node4 [label="..."])
     // [^\]]+ grabs everything inside the brackets, even if it spans multiple lines!
-    const nodeRegex = /"?([a-zA-Z0-9_]+)"?\s*\[([^\]]+)\]/g;
+    const nodeRegex = /"?([a-zA-Z0-9_]+)"?\s*\[([^\]]+)/g;
     let nodeMatch;
     while ((nodeMatch = nodeRegex.exec(dotText)) !== null) {
         const id = nodeMatch[1];
