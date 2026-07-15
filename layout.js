@@ -1,5 +1,3 @@
-const MAX_DEPTH = 3;
-
 function parseNodeLabel(rawLabel) {
     const label = rawLabel ?? "";
     const lines = String(label).split(/\\n|\n/);
@@ -19,31 +17,182 @@ function makeFileKey(folder, file) {
     return file || folder || "";
 }
 
-function buildLevels(rootId, edges) {
-    const levels = Array.from({ length: MAX_DEPTH + 1 }, () => []);
-    const depthById = new Map();
-    const queue = [rootId];
+function makeDAG(rootId, edges) {
+    const dagEdges = new Map();
+    const visited = new Set();
+    const stack = new Set();
 
-    levels[0].push(rootId);
-    depthById.set(rootId, 0);
-
-    while (queue.length) {
-        const current = queue.shift();
-        const depth = depthById.get(current);
-        if (depth === MAX_DEPTH) {
-            continue;
-        }
-        const neighbors = edges.get(current);
-        if (!neighbors) {
-            continue;
-        }
-        for (const neighbor of neighbors) {
-            if (depthById.has(neighbor)) {
-                continue;
+    function dfs(u) {
+        visited.add(u);
+        stack.add(u);
+        const neighbors = edges.get(u) || [];
+        const dagNeighbors = [];
+        for (const v of neighbors) {
+            if (!visited.has(v)) {
+                dagNeighbors.push(v);
+                dfs(v);
+            } else if (!stack.has(v)) {
+                dagNeighbors.push(v);
             }
-            depthById.set(neighbor, depth + 1);
-            levels[depth + 1].push(neighbor);
-            queue.push(neighbor);
+        }
+        if (dagNeighbors.length > 0) {
+            dagEdges.set(u, dagNeighbors);
+        }
+        stack.delete(u);
+    }
+    dfs(rootId);
+    return dagEdges;
+}
+
+function getPredecessors(V, dagEdges) {
+    const preds = new Map();
+    for (const v of V) preds.set(v, []);
+    for (const [u, targets] of dagEdges.entries()) {
+        for (const v of targets) preds.get(v).push(u);
+    }
+    return preds;
+}
+
+function longestPathAlgorithm(V, dagEdges, preds) {
+    const layering = new Map();
+    const U = new Set();
+    let Z = new Set();
+    let currentLayer = 1;
+
+    const outDegCount = new Map();
+    for (const v of V) outDegCount.set(v, (dagEdges.get(v) || []).length);
+
+    while (U.size < V.size) {
+        const ready = [];
+        for (const v of V) {
+            if (!U.has(v) && outDegCount.get(v) === 0) {
+                ready.push(v);
+            }
+        }
+
+        if (ready.length > 0) {
+            for (const v of ready) {
+                layering.set(v, currentLayer);
+                U.add(v);
+            }
+        } else {
+            currentLayer++;
+            for (const v of U) {
+                if (!Z.has(v)) {
+                    Z.add(v);
+                    for (const p of (preds.get(v) || [])) {
+                        outDegCount.set(p, outDegCount.get(p) - 1);
+                    }
+                }
+            }
+        }
+    }
+    return layering;
+}
+
+function promoteNode(v, layering, preds, dagEdges) {
+    let dummydiff = 0;
+    const vLayer = layering.get(v);
+    
+    for (const u of (preds.get(v) || [])) {
+        if (layering.get(u) === vLayer + 1) {
+            dummydiff += promoteNode(u, layering, preds, dagEdges);
+        }
+    }
+    
+    layering.set(v, vLayer + 1);
+    
+    const inDeg = (preds.get(v) || []).length;
+    const outDeg = (dagEdges.get(v) || []).length;
+    dummydiff += (-inDeg + outDeg);
+    
+    return dummydiff;
+}
+
+function nodePromotionHeuristic(V, dagEdges, preds, layering) {
+    let layeringBackUp = new Map(layering);
+    let promotions;
+    
+    do {
+        promotions = 0;
+        for (const v of V) {
+            const inDeg = (preds.get(v) || []).length;
+            if (inDeg > 0) {
+                const diff = promoteNode(v, layering, preds, dagEdges);
+                if (diff < 0) {
+                    promotions++;
+                    layeringBackUp = new Map(layering);
+                } else {
+                    for (const [k, val] of layeringBackUp.entries()) {
+                        layering.set(k, val);
+                    }
+                }
+            }
+        }
+    } while (promotions > 0);
+    
+    return layering;
+}
+
+function buildLevels(rootId, edges, nodes) {
+    const dagEdges = makeDAG(rootId, edges);
+
+    const V = new Set();
+    V.add(rootId);
+    for (const [u, targets] of dagEdges.entries()) {
+        V.add(u);
+        for (const v of targets) V.add(v);
+    }
+
+    const preds = getPredecessors(V, dagEdges);
+    let layering = longestPathAlgorithm(V, dagEdges, preds);
+    layering = nodePromotionHeuristic(V, dagEdges, preds, layering);
+
+    let maxLayer = 0;
+    for (const l of layering.values()) {
+        if (l > maxLayer) maxLayer = l;
+    }
+
+    const topDownLayering = new Map();
+    for (const [v, l] of layering.entries()) {
+        topDownLayering.set(v, maxLayer - l);
+    }
+
+    const levels = Array.from({ length: maxLayer + 1 }, () => []);
+    const depthById = new Map();
+
+    for (const [v, l] of topDownLayering.entries()) {
+        levels[l].push(v);
+        depthById.set(v, l);
+    }
+
+    edges.clear();
+    
+    for (const [u, targets] of dagEdges.entries()) {
+        const layerU = topDownLayering.get(u);
+        for (const v of targets) {
+            const layerV = topDownLayering.get(v);
+            if (layerV > layerU + 1) {
+                let prev = u;
+                for (let l = layerU + 1; l < layerV; l++) {
+                    const dummyId = `dummy|${u}|${v}|${l}`;
+                    levels[l].push(dummyId);
+                    depthById.set(dummyId, l);
+                    
+                    const vLabel = nodes.get(v) || String(v);
+                    nodes.set(dummyId, vLabel);
+
+                    if (!edges.has(prev)) edges.set(prev, []);
+                    edges.get(prev).push(dummyId);
+                    
+                    prev = dummyId;
+                }
+                if (!edges.has(prev)) edges.set(prev, []);
+                edges.get(prev).push(v);
+            } else {
+                if (!edges.has(u)) edges.set(u, []);
+                edges.get(u).push(v);
+            }
         }
     }
 
@@ -128,7 +277,7 @@ function buildEdgesByDepth(edges, depthById) {
     const edgesByDepth = new Map();
     for (const [from, targets] of edges.entries()) {
         const fromDepth = depthById.get(from);
-        if (fromDepth === undefined || fromDepth >= MAX_DEPTH) {
+        if (fromDepth === undefined) {
             continue;
         }
         for (const target of targets) {

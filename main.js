@@ -25,7 +25,7 @@ fetch("callgraph_folders.dot")
             return;
         }
 
-        const { levels, depthById } = buildLevels(rootId, edges);
+        const { levels, depthById } = buildLevels(rootId, edges, nodes);
         renderGraph(levels, depthById, nodes, edges);
     })
     .catch((error) => {

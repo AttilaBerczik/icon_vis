@@ -39,14 +39,16 @@ function renderGraph(levels, depthById, nodes, edges) {
                 localMaxLineLength = Math.max(localMaxLineLength, line.length);
             });
 
-            const calculatedWidth = Math.max(32, localMaxLineLength * charWidthEstimate + basePaddingX);
-            const calculatedHeight = Math.max(24, lines.length * lineHeight + basePaddingY);
+            const isDummy = String(id).startsWith("dummy|");
+            const calculatedWidth = isDummy ? 0 : Math.max(32, localMaxLineLength * charWidthEstimate + basePaddingX);
+            const calculatedHeight = isDummy ? 0 : Math.max(24, lines.length * lineHeight + basePaddingY);
 
             nodeData.push({
                 id, depth, rawLabel, lines,
                 width: calculatedWidth, height: calculatedHeight,
                 folder: labelInfo.folder, file: labelInfo.file,
-                fileKey: makeFileKey(labelInfo.folder, labelInfo.file)
+                fileKey: makeFileKey(labelInfo.folder, labelInfo.file),
+                isDummy
             });
         });
     });
@@ -90,6 +92,8 @@ function renderGraph(levels, depthById, nodes, edges) {
         const maxNodeWidthInFileForLevel = new Map();
 
         levelIds.forEach((id) => {
+            if (String(id).startsWith("dummy|")) return;
+
             const fileKey = getNodeFileKey(id, nodes);
             counts.set(fileKey, (counts.get(fileKey) || 0) + 1);
 
@@ -144,22 +148,25 @@ function renderGraph(levels, depthById, nodes, edges) {
                 const ids = depthMap ? depthMap.get(depth) : null;
                 if (!ids || ids.length === 0) return;
 
+                const realIds = ids.filter(id => !String(id).startsWith("dummy|"));
+                if (realIds.length === 0) return;
+
                 const startX = fileStartX.get(f);
 
                 if (isFolderCollapsed || isFileCollapsed) {
                     const colCenter = startX + COLLAPSED_WIDTH / 2;
-                    ids.forEach(id => positionsX.set(id, colCenter));
+                    realIds.forEach(id => positionsX.set(id, colCenter));
                 } else {
                     const totalColWidth = fileColumnWidths.get(f);
                     const colCenter = startX + totalColWidth / 2;
 
-                    const K = ids.length;
+                    const K = realIds.length;
                     let totalSubsegmentWidth = 0;
-                    ids.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
+                    realIds.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
                     totalSubsegmentWidth += (K - 1) * xSpacingBetweenNodes;
 
                     let segmentStartX = colCenter - totalSubsegmentWidth / 2;
-                    ids.forEach((id) => {
+                    realIds.forEach((id) => {
                         const dims = nodeDims.get(id);
                         const x = segmentStartX + dims.w / 2;
                         positionsX.set(id, x);
@@ -170,13 +177,28 @@ function renderGraph(levels, depthById, nodes, edges) {
         });
     });
 
+    // 4.5 Map dummy nodes to perfectly align with their final target node
+    nodeData.forEach(d => {
+        if (d.isDummy) {
+            const parts = String(d.id).split("|");
+            if (parts.length >= 3) {
+                const targetX = positionsX.get(parts[2]);
+                if (targetX !== undefined) {
+                    positionsX.set(d.id, targetX);
+                } else {
+                    positionsX.set(d.id, 0); // safe fallback
+                }
+            }
+        }
+    });
+
     // 5. Generate links and perform Interval Graph Coloring
     const linkData = [];
-    const layersEdges = Array.from({ length: MAX_DEPTH }, () => []);
+    const layersEdges = Array.from({ length: levels.length }, () => []);
 
     for (const [from, targets] of edges.entries()) {
         const fromDepth = depthById.get(from);
-        if (fromDepth === undefined || fromDepth >= MAX_DEPTH) continue;
+        if (fromDepth === undefined || fromDepth >= levels.length) continue;
         const sourceX = positionsX.get(from);
         if (sourceX === undefined) continue;
 
@@ -195,7 +217,7 @@ function renderGraph(levels, depthById, nodes, edges) {
         }
     }
 
-    const maxLanesPerLayer = new Array(MAX_DEPTH).fill(0);
+    const maxLanesPerLayer = new Array(levels.length).fill(0);
 
     layersEdges.forEach((layer, depth) => {
         if (layer.length === 0) return;
@@ -508,7 +530,7 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     // --- Render Visible Nodes Only ---
     const visibleNodeData = nodeData.filter(d =>
-        !collapsedFolders.has(d.folder) && !collapsedFiles.has(d.fileKey)
+        !d.isDummy && !collapsedFolders.has(d.folder) && !collapsedFiles.has(d.fileKey)
     );
 
     const nodesSelection = mainGroup.append("g").attr("class", "nodes")
