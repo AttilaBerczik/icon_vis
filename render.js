@@ -1,18 +1,28 @@
-// State management for collapsed components and interactions
-const collapsedFolders = new Set();
-const collapsedFiles = new Set();
-let currentGraphData = null;
-let isInitialRender = true;
-let currentZoomTransform = d3.zoomIdentity;
+// Context menu target (shared across all graph instances on this page)
+let contextMenuNodeId = null;
 
-// NEW: Cache layout order to prevent random shuffling when toggling boxes
-let cachedLayout = null;
-// NEW: Track the clicked element to keep the camera anchored to the mouse
-let targetElementToTrack = null;
+// State management factory — each graph instance gets its own state
+function createGraphState() {
+    return {
+        collapsedFolders: new Set(),
+        collapsedFiles: new Set(),
+        currentGraphData: null,
+        isInitialRender: true,
+        currentZoomTransform: d3.zoomIdentity,
+        cachedLayout: null,
+        targetElementToTrack: null,
+    };
+}
 
-function renderGraph(levels, depthById, nodes, edges) {
+function renderGraph(levels, depthById, nodes, edges, containerSel, state, options) {
+    const focusNodeId = (options && options.focusNodeId) || null;
+
     // Save state so we can re-render cleanly on toggles
-    currentGraphData = { levels, depthById, nodes, edges };
+    state.currentGraphData = { levels, depthById, nodes, edges };
+    const container = containerSel;
+    const collapsedFolders = state.collapsedFolders;
+    const collapsedFiles = state.collapsedFiles;
+
     container.selectAll("*").remove();
 
     const nodeData = [];
@@ -55,14 +65,14 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     const nodeDims = new Map(nodeData.map(d => [d.id, { w: d.width, h: d.height }]));
 
-    // --- NEW: Layout Caching ---
+    // --- Layout Caching ---
     // Only run the randomized optimization on the very first render.
     let orderedFolders, orderedFilesByFolder, nodeOrderByFileDepth, fileMetaByKey;
 
-    if (!cachedLayout || isInitialRender) {
+    if (!state.cachedLayout || state.isInitialRender) {
         const { folderOrder: fo, fileOrderByFolder: fof, fileMetaByKey: fmbk } = buildFolderFileIndex(levels, nodes);
         const optimized = optimizeLayout(levels, depthById, nodes, edges, fo, fof);
-        cachedLayout = {
+        state.cachedLayout = {
             folderOrder: optimized.folderOrder,
             fileOrderByFolder: optimized.fileOrderByFolder,
             nodeOrderByFileDepth: optimized.nodeOrderByFileDepth,
@@ -70,10 +80,10 @@ function renderGraph(levels, depthById, nodes, edges) {
         };
     }
 
-    orderedFolders = cachedLayout.folderOrder;
-    orderedFilesByFolder = cachedLayout.fileOrderByFolder;
-    nodeOrderByFileDepth = cachedLayout.nodeOrderByFileDepth;
-    fileMetaByKey = cachedLayout.fileMetaByKey;
+    orderedFolders = state.cachedLayout.folderOrder;
+    orderedFilesByFolder = state.cachedLayout.fileOrderByFolder;
+    nodeOrderByFileDepth = state.cachedLayout.nodeOrderByFileDepth;
+    fileMetaByKey = state.cachedLayout.fileMetaByKey;
 
     const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
     // ---------------------------
@@ -353,26 +363,26 @@ function renderGraph(levels, depthById, nodes, edges) {
         });
     });
 
-    // --- NEW: Camera Target Compensation ---
+    // --- Camera Target Compensation ---
     // Calculate how far the clicked box moved in SVG coordinates,
     // and seamlessly translate the camera to perfectly match it.
-    if (targetElementToTrack) {
+    if (state.targetElementToTrack) {
         let newX, newY;
-        if (targetElementToTrack.type === 'folder') {
-            const box = folderBoxData.find(b => b.folder === targetElementToTrack.id);
+        if (state.targetElementToTrack.type === 'folder') {
+            const box = folderBoxData.find(b => b.folder === state.targetElementToTrack.id);
             if (box) { newX = box.x; newY = box.y; }
-        } else if (targetElementToTrack.type === 'file') {
-            const box = fileBoxData.find(b => b.file === targetElementToTrack.id);
+        } else if (state.targetElementToTrack.type === 'file') {
+            const box = fileBoxData.find(b => b.file === state.targetElementToTrack.id);
             if (box) { newX = box.x; newY = box.y; }
         }
 
         if (newX !== undefined && newY !== undefined) {
-            currentZoomTransform = currentZoomTransform.translate(
-                targetElementToTrack.oldX - newX,
-                targetElementToTrack.oldY - newY
+            state.currentZoomTransform = state.currentZoomTransform.translate(
+                state.targetElementToTrack.oldX - newX,
+                state.targetElementToTrack.oldY - newY
             );
         }
-        targetElementToTrack = null; // Clear the track target
+        state.targetElementToTrack = null; // Clear the track target
     }
 
     // 8. Generate Edge Clipping Bounds Map
@@ -429,8 +439,8 @@ function renderGraph(levels, depthById, nodes, edges) {
             else collapsedFolders.add(d.folder);
 
             // Mark this specific box's coordinates to anchor the camera against
-            targetElementToTrack = { type: 'folder', id: d.folder, oldX: d.x, oldY: d.y };
-            renderGraph(currentGraphData.levels, currentGraphData.depthById, currentGraphData.nodes, currentGraphData.edges);
+            state.targetElementToTrack = { type: 'folder', id: d.folder, oldX: d.x, oldY: d.y };
+            renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
         });
 
     folderToggles.append("rect")
@@ -465,8 +475,8 @@ function renderGraph(levels, depthById, nodes, edges) {
             else collapsedFiles.add(d.file);
 
             // Mark this specific box's coordinates to anchor the camera against
-            targetElementToTrack = { type: 'file', id: d.file, oldX: d.x, oldY: d.y };
-            renderGraph(currentGraphData.levels, currentGraphData.depthById, currentGraphData.nodes, currentGraphData.edges);
+            state.targetElementToTrack = { type: 'file', id: d.file, oldX: d.x, oldY: d.y };
+            renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
         });
 
     fileToggles.append("rect")
@@ -533,6 +543,11 @@ function renderGraph(levels, depthById, nodes, edges) {
         !d.isDummy && !collapsedFolders.has(d.folder) && !collapsedFiles.has(d.fileKey)
     );
 
+    const isNodeHighlighted = (d) => {
+        if (focusNodeId) return d.id === focusNodeId;
+        return d.depth === 0;
+    };
+
     const nodesSelection = mainGroup.append("g").attr("class", "nodes")
         .selectAll("g").data(visibleNodeData).enter().append("g")
         .attr("transform", (d) => {
@@ -542,12 +557,12 @@ function renderGraph(levels, depthById, nodes, edges) {
 
     nodesSelection.append("rect")
         .attr("width", d => d.width).attr("height", d => d.height)
-        .attr("rx", 6).attr("fill", d => (d.depth === 0 ? "#2563eb" : "#e2e8f0"))
+        .attr("rx", 6).attr("fill", d => (isNodeHighlighted(d) ? "#2563eb" : "#e2e8f0"))
         .attr("stroke", "#94a3b8");
 
     nodesSelection.append("text")
         .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
-        .attr("text-anchor", "middle").attr("font-size", "12px").attr("fill", d => (d.depth === 0 ? "#f8fafc" : "#1f2937"))
+        .attr("text-anchor", "middle").attr("font-size", "12px").attr("fill", d => (isNodeHighlighted(d) ? "#f8fafc" : "#1f2937"))
         .selectAll("tspan")
         .data(d => d.lines.map(line => ({ line, width: d.width, lineCount: d.lines.length })))
         .enter().append("tspan")
@@ -558,13 +573,13 @@ function renderGraph(levels, depthById, nodes, edges) {
     const zoom = d3.zoom()
         .scaleExtent([0.05, 5])
         .on("zoom", (event) => {
-            currentZoomTransform = event.transform;
+            state.currentZoomTransform = event.transform;
             mainGroup.attr("transform", event.transform);
         });
 
     svg.call(zoom);
 
-    if (isInitialRender) {
+    if (state.isInitialRender) {
         const paddingFit = 40;
         const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
         const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
@@ -572,18 +587,19 @@ function renderGraph(levels, depthById, nodes, edges) {
         const tx = (viewportWidth - svgWidth * initialScale) / 2;
         const ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
 
-        currentZoomTransform = d3.zoomIdentity.translate(tx, ty).scale(initialScale);
-        isInitialRender = false;
+        state.currentZoomTransform = d3.zoomIdentity.translate(tx, ty).scale(initialScale);
+        state.isInitialRender = false;
     }
 
     // Apply the saved or actively compensated zoom seamlessly
-    svg.call(zoom.transform, currentZoomTransform);
-    mainGroup.attr("transform", currentZoomTransform);
+    svg.call(zoom.transform, state.currentZoomTransform);
+    mainGroup.attr("transform", state.currentZoomTransform);
 
-    attachInteractions(nodesSelection, edgesSelection, edges);
+    attachInteractions(nodesSelection, edgesSelection, edges, svg);
 }
 
-function renderError(message) {
+function renderError(message, containerSel) {
+    const container = containerSel || d3.select("#visualization");
     container.selectAll("*").remove();
     container.append("div").style("color", "#b91c1c").style("font-weight", "600").text(message);
 }
@@ -638,7 +654,7 @@ function getAllConnected(startId, edges, reverseEdges) {
     return connected;
 }
 
-function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
+function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl) {
     const reverseEdgesMap = buildReverseEdges(edgesMap);
     let activeClickedNodeId = null;
 
@@ -676,6 +692,26 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
                 d3.select(this).raise();
             }
             event.stopPropagation();
+        })
+        .on("contextmenu", function(event, d) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            // Skip dummy nodes
+            if (d.isDummy) return;
+
+            contextMenuNodeId = d.id;
+
+            const ctxMenu = document.getElementById("context-menu");
+            if (!ctxMenu) return;
+
+            const functionName = d.lines[d.lines.length - 1];
+            const ctxLabel = document.getElementById("ctx-open-tab");
+            if (ctxLabel) ctxLabel.textContent = `🔍 Open "${functionName}" in New Tab`;
+
+            ctxMenu.style.display = "block";
+            ctxMenu.style.left = event.clientX + "px";
+            ctxMenu.style.top = event.clientY + "px";
         });
 
     edgesSelection
@@ -695,10 +731,13 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap) {
             updateHighlightState(null);
         });
 
-    d3.select("svg").on("click", () => {
+    svgEl.on("click", () => {
         if (activeClickedNodeId) {
             activeClickedNodeId = null;
             updateHighlightState(null);
         }
+        // Hide context menu on background click
+        const ctxMenu = document.getElementById("context-menu");
+        if (ctxMenu) ctxMenu.style.display = "none";
     });
 }

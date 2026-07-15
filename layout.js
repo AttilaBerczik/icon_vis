@@ -612,3 +612,47 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
         nodeOrderByFileDepth: bestNodeOrder
     };
 }
+
+function cloneEdges(edges) {
+    const clone = new Map();
+    for (const [from, targets] of edges) {
+        clone.set(from, new Set(targets));
+    }
+    return clone;
+}
+
+function cloneNodes(nodes) {
+    return new Map(nodes);
+}
+
+function buildReverseEdgeMap(edges) {
+    const reverse = new Map();
+    for (const [from, targets] of edges) {
+        for (const target of targets) {
+            if (!reverse.has(target)) reverse.set(target, new Set());
+            reverse.get(target).add(from);
+        }
+    }
+    return reverse;
+}
+
+function flipGraph(levels, depthById, edges) {
+    const maxDepth = levels.length - 1;
+
+    const flippedLevels = levels.slice().reverse();
+
+    const flippedDepth = new Map();
+    for (const [id, depth] of depthById) {
+        flippedDepth.set(id, maxDepth - depth);
+    }
+
+    const flippedEdges = new Map();
+    for (const [from, targets] of edges) {
+        for (const target of targets) {
+            if (!flippedEdges.has(target)) flippedEdges.set(target, []);
+            flippedEdges.get(target).push(from);
+        }
+    }
+
+    return { levels: flippedLevels, depthById: flippedDepth, edges: flippedEdges };
+}
