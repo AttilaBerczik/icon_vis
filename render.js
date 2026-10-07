@@ -17,6 +17,7 @@ function createGraphState() {
         nodeDims: null,
         currentZoomBehavior: null,
         viewportDims: null,
+        activeClickedNodeId: null,
     };
 }
 
@@ -548,6 +549,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     // --- Render Edges ---
     const edgesSelection = edgesGroup.selectAll("path").data(linkData).enter().append("path")
+        .attr("class", "graph-edge")
         .attr("fill", "none").attr("stroke", "#94a3b8").attr("stroke-width", 1)
         .attr("d", (d) => buildPathLine(d, nodeDims, document.getElementById("toggle-orthogonal")?.checked));
 
@@ -755,6 +757,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .style("pointer-events", "none");
 
     const textNodes = nodesSelection.append("text")
+        .attr("class", "node-text")
         .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
         .attr("text-anchor", "middle").attr("font-size", "12px")
         .attr("fill", d => getNodeTextFill(d));
@@ -1012,7 +1015,13 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         }
     }
 
-    attachInteractions(nodesSelection, edgesSelection, edges, svg, state);
+    attachInteractions(nodesSelection, edgesSelection, edges, svg, state, {
+        getNodeRectFill,
+        getNodeRectStroke,
+        getNodeRectStrokeWidth,
+        getNodeFilter,
+        getNodeTextFill
+    });
 }
 
 function renderError(message, containerSel) {
@@ -1071,52 +1080,176 @@ function getAllConnected(startId, edges, reverseEdges) {
     return connected;
 }
 
-function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, state) {
+function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, state, styleHelpers) {
     const reverseEdgesMap = buildReverseEdges(edgesMap);
-    let activeClickedNodeId = null;
+    let activeClickedNodeId = (state && state.activeClickedNodeId) || null;
+
+    const {
+        getNodeRectFill = (d) => (d.depth === 0 ? "#2563eb" : "#e2e8f0"),
+        getNodeRectStroke = () => "#94a3b8",
+        getNodeRectStrokeWidth = () => 1,
+        getNodeFilter = () => null,
+        getNodeTextFill = (d) => (d.depth === 0 ? "#f8fafc" : "#1f2937")
+    } = (styleHelpers || {});
 
     const isSearchActive = () => !!(state && state.searchState && state.searchState.matchingNodeIds && state.searchState.matchingNodeIds.size > 0);
 
-    function updateHighlightState(activeSet) {
+    function updateHighlightState(activeSet, primaryId) {
         if (!activeSet) {
+            nodesSelection.each(function(d) {
+                const g = d3.select(this);
+                g.classed("node-primary-highlight", false);
+                g.classed("node-connected-highlight", false);
+
+                if (isSearchActive()) {
+                    g.style("opacity", state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
+                } else {
+                    g.style("opacity", 1);
+                }
+                g.select("rect.node-rect")
+                    .attr("fill", getNodeRectFill(d))
+                    .attr("stroke", getNodeRectStroke(d))
+                    .attr("stroke-width", getNodeRectStrokeWidth(d))
+                    .style("filter", getNodeFilter(d) || "none");
+                g.select("text.node-text")
+                    .attr("fill", getNodeTextFill(d));
+                g.selectAll("tspan")
+                    .attr("font-weight", (t) => {
+                        if (t && t.isActiveMatch) return "800";
+                        if (t && t.matchType === "function" && t.isFuncLine) return "800";
+                        if (t && t.matchType) return "700";
+                        return "normal";
+                    });
+            });
+
             if (isSearchActive()) {
-                nodesSelection.style("opacity", d => state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
-                edgesSelection.style("opacity", 0.15);
+                edgesSelection.style("opacity", 0.15)
+                    .attr("stroke", "#94a3b8")
+                    .attr("stroke-width", 1);
             } else {
-                nodesSelection.style("opacity", 1);
-                edgesSelection.style("opacity", 1);
+                edgesSelection.style("opacity", 1)
+                    .attr("stroke", "#94a3b8")
+                    .attr("stroke-width", 1);
             }
             return;
         }
 
-        nodesSelection.style("opacity", d => activeSet.has(d.id) ? 1 : 0.15);
-        edgesSelection.style("opacity", d => (activeSet.has(d.fromId) && activeSet.has(d.toId)) ? 1 : 0.05);
+        nodesSelection.each(function(d) {
+            const g = d3.select(this);
+            const isPrimary = !!(primaryId && d.id === primaryId);
+            const isConnected = activeSet.has(d.id);
+
+            g.classed("node-primary-highlight", isPrimary);
+            g.classed("node-connected-highlight", isConnected && !isPrimary);
+
+            if (isPrimary) {
+                // Primary node (Hovered or Clicked): MUCH stronger contrast
+                g.style("opacity", 1);
+                g.select("rect.node-rect")
+                    .attr("fill", "#0f172a") // Deep slate-900 / dark contrast
+                    .attr("stroke", "#38bdf8") // Vivid luminous sky-blue border
+                    .attr("stroke-width", 3)
+                    .style("filter", "drop-shadow(0 4px 8px rgba(15, 23, 42, 0.45))");
+                g.select("text.node-text")
+                    .attr("fill", "#ffffff"); // Pure white
+                g.selectAll("tspan")
+                    .attr("font-weight", (t) => (t && t.isFuncLine ? "800" : "700"));
+            } else if (isConnected) {
+                // Connected nodes: SOMEWHAT stronger contrast
+                g.style("opacity", 1);
+                g.select("rect.node-rect")
+                    .attr("fill", "#2563eb") // Rich Royal Blue 600
+                    .attr("stroke", "#1d4ed8") // Deep blue 700 border
+                    .attr("stroke-width", 2)
+                    .style("filter", "none");
+                g.select("text.node-text")
+                    .attr("fill", "#ffffff"); // Pure white
+                g.selectAll("tspan")
+                    .attr("font-weight", (t) => (t && t.isFuncLine ? "700" : "600"));
+            } else {
+                // Non-highlighted nodes: keep opacity as before
+                if (isSearchActive()) {
+                    g.style("opacity", state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
+                } else {
+                    g.style("opacity", 1);
+                }
+                g.select("rect.node-rect")
+                    .attr("fill", getNodeRectFill(d))
+                    .attr("stroke", getNodeRectStroke(d))
+                    .attr("stroke-width", getNodeRectStrokeWidth(d))
+                    .style("filter", "none");
+                g.select("text.node-text")
+                    .attr("fill", getNodeTextFill(d));
+                g.selectAll("tspan")
+                    .attr("font-weight", (t) => {
+                        if (t && t.isActiveMatch) return "800";
+                        if (t && t.matchType === "function" && t.isFuncLine) return "800";
+                        if (t && t.matchType) return "700";
+                        return "normal";
+                    });
+            }
+        });
+
+        // Edges styling: direct links to primary node are boldest, other active edges distinct; opacity preserved
+        const defaultEdgeOpacity = isSearchActive() ? 0.15 : 1;
+        edgesSelection.each(function(d) {
+            const edge = d3.select(this);
+            const isConnectedToPrimary = primaryId && (d.fromId === primaryId || d.toId === primaryId);
+            const isConnectedInActiveSet = activeSet.has(d.fromId) && activeSet.has(d.toId);
+
+            edge.style("opacity", defaultEdgeOpacity);
+
+            if (isConnectedToPrimary) {
+                edge.attr("stroke", "#2563eb")
+                    .attr("stroke-width", 2.5);
+            } else if (isConnectedInActiveSet) {
+                edge.attr("stroke", "#3b82f6")
+                    .attr("stroke-width", 2);
+            } else {
+                edge.attr("stroke", "#94a3b8")
+                    .attr("stroke-width", 1);
+            }
+        });
+
+        // Layering order: active edges -> connected nodes -> primary node on top
+        edgesSelection.filter(d => activeSet.has(d.fromId) && activeSet.has(d.toId)).raise();
+        nodesSelection.filter(d => activeSet.has(d.id) && d.id !== primaryId).raise();
+        if (primaryId) {
+            nodesSelection.filter(d => d.id === primaryId).raise();
+        }
     }
 
-    // Apply initial search dimming if search is active
-    updateHighlightState(null);
+    // Restore active clicked node or search state
+    if (activeClickedNodeId && nodesSelection.data().some(d => d.id === activeClickedNodeId)) {
+        const allConnected = getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
+        updateHighlightState(allConnected, activeClickedNodeId);
+    } else {
+        activeClickedNodeId = null;
+        if (state) state.activeClickedNodeId = null;
+        updateHighlightState(null, null);
+    }
 
     nodesSelection
         .style("cursor", "pointer")
         .on("mouseover", function(event, d) {
             if (activeClickedNodeId) return;
             const immediateNeighbors = getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
-            updateHighlightState(immediateNeighbors);
-            d3.select(this).raise();
+            updateHighlightState(immediateNeighbors, d.id);
         })
         .on("mouseout", function() {
             if (activeClickedNodeId) return;
-            updateHighlightState(null);
+            updateHighlightState(null, null);
         })
         .on("click", function(event, d) {
             if (activeClickedNodeId === d.id) {
                 activeClickedNodeId = null;
-                updateHighlightState(null);
+                if (state) state.activeClickedNodeId = null;
+                updateHighlightState(null, null);
             } else {
                 activeClickedNodeId = d.id;
+                if (state) state.activeClickedNodeId = d.id;
                 const allConnected = getAllConnected(d.id, edgesMap, reverseEdgesMap);
-                updateHighlightState(allConnected);
-                d3.select(this).raise();
+                updateHighlightState(allConnected, d.id);
             }
             event.stopPropagation();
         })
@@ -1124,7 +1257,6 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             event.preventDefault();
             event.stopPropagation();
 
-            // Skip dummy nodes
             if (d.isDummy) return;
 
             contextMenuNodeId = d.id;
@@ -1143,25 +1275,26 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
 
     edgesSelection
         .style("cursor", "crosshair")
-        .attr("stroke-width", 2)
+        .attr("stroke-width", 1)
         .on("mouseover", function(event, d) {
             if (activeClickedNodeId) return;
             const activeSet = new Set([d.fromId]);
             const siblings = edgesMap.get(d.fromId) || [];
             siblings.forEach(targetId => activeSet.add(targetId));
 
-            updateHighlightState(activeSet);
-            edgesSelection.filter(e => e.fromId === d.fromId).raise();
+            updateHighlightState(activeSet, d.fromId);
         })
         .on("mouseout", function() {
             if (activeClickedNodeId) return;
-            updateHighlightState(null);
+            updateHighlightState(null, null);
         });
 
-    svgEl.on("click", () => {
+    svgEl.on("click", (event) => {
+        if (event && event.defaultPrevented) return;
         if (activeClickedNodeId) {
             activeClickedNodeId = null;
-            updateHighlightState(null);
+            if (state) state.activeClickedNodeId = null;
+            updateHighlightState(null, null);
         }
         // Hide context menu on background click
         const ctxMenu = document.getElementById("context-menu");

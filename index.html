@@ -199,6 +199,23 @@
             pointer-events: none;
         }
 
+        /* --- Node & Edge Highlighting Contrast & Transitions --- */
+        .node-g {
+            transition: opacity 0.15s ease;
+        }
+
+        .node-rect {
+            transition: fill 0.15s ease, stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+        }
+
+        .node-text {
+            transition: fill 0.15s ease;
+        }
+
+        .graph-edge {
+            transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+        }
+
         /* --- Sub-graph Header --- */
         #subgraph-header {
             display: none;
