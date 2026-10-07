@@ -12,6 +12,11 @@ function createGraphState() {
         currentZoomTransform: d3.zoomIdentity,
         cachedLayout: null,
         targetElementToTrack: null,
+        searchState: null,
+        nodePositions: null,
+        nodeDims: null,
+        currentZoomBehavior: null,
+        viewportDims: null,
     };
 }
 
@@ -426,6 +431,29 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     const viewportHeight = (containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : (document.getElementById("graph-split-container")?.clientHeight || window.innerHeight - 48);
 
     const svg = container.append("svg").attr("width", "100%").attr("height", "100%");
+
+    // SVG Defs for search highlights
+    const svgDefs = svg.append("defs");
+    const filterAmber = svgDefs.append("filter")
+        .attr("id", "glow-amber")
+        .attr("x", "-25%").attr("y", "-25%")
+        .attr("width", "150%").attr("height", "150%");
+    filterAmber.append("feDropShadow")
+        .attr("dx", "0").attr("dy", "1")
+        .attr("stdDeviation", "4")
+        .attr("flood-color", "#f59e0b")
+        .attr("flood-opacity", "0.7");
+
+    const filterActive = svgDefs.append("filter")
+        .attr("id", "glow-active")
+        .attr("x", "-35%").attr("y", "-35%")
+        .attr("width", "170%").attr("height", "170%");
+    filterActive.append("feDropShadow")
+        .attr("dx", "0").attr("dy", "2")
+        .attr("stdDeviation", "6")
+        .attr("flood-color", "#ea580c")
+        .attr("flood-opacity", "0.9");
+
     const mainGroup = svg.append("g").attr("class", "main-zoom-group");
 
     // Drawing Groups Order
@@ -552,6 +580,37 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
     };
 
+    container.node().search = function(query) {
+        return executeSearch(query, state, container, options);
+    };
+
+    container.node().clearSearch = function() {
+        state.searchState = null;
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, {
+            ...options,
+            animateToNode: false
+        });
+        return { count: 0, currentIndex: -1, matches: [] };
+    };
+
+    container.node().nextMatch = function() {
+        if (!state.searchState || !state.searchState.matches || state.searchState.matches.length === 0) return null;
+        return jumpToMatch(state.searchState.currentIndex + 1, state, container, options);
+    };
+
+    container.node().prevMatch = function() {
+        if (!state.searchState || !state.searchState.matches || state.searchState.matches.length === 0) return null;
+        return jumpToMatch(state.searchState.currentIndex - 1, state, container, options);
+    };
+
+    container.node().jumpToMatch = function(index) {
+        return jumpToMatch(index, state, container, options);
+    };
+
+    container.node().getSearchState = function() {
+        return state.searchState;
+    };
+
     function buildPathLine(d, nodeDims, useOrthogonal) {
         const hFrom = nodeDims.get(d.fromId).h;
         const hTo = nodeDims.get(d.toId).h;
@@ -596,25 +655,127 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         return d.depth === 0;
     };
 
+    const searchState = state.searchState;
+    const isSearchActive = !!(searchState && searchState.query && searchState.matchingNodeIds && searchState.matchingNodeIds.size > 0);
+    const activeMatchId = (isSearchActive && searchState.matches && searchState.matches.length > 0 && searchState.currentIndex >= 0)
+        ? searchState.matches[searchState.currentIndex]?.id
+        : null;
+
+    const getNodeMatchType = (d) => {
+        if (!isSearchActive) return null;
+        return searchState.matchingTypes.get(d.id) || null;
+    };
+
+    const getNodeRectFill = (d) => {
+        const mt = getNodeMatchType(d);
+        if (mt) {
+            if (d.id === activeMatchId) return "#ff5722"; // Active search match: radiant flaming orange-red
+            if (mt === "function") return "#f59e0b"; // Function match (highest priority): vivid amber gold
+            if (mt === "file") return "#8b5cf6"; // File match: vivid violet
+            if (mt === "folder") return "#06b6d4"; // Folder match: electric cyan
+        }
+        if (isNodeHighlighted(d)) return "#2563eb";
+        return "#e2e8f0";
+    };
+
+    const getNodeRectStroke = (d) => {
+        const mt = getNodeMatchType(d);
+        if (mt) {
+            if (d.id === activeMatchId) return "#b91c1c";
+            if (mt === "function") return "#b45309";
+            if (mt === "file") return "#5b21b6";
+            if (mt === "folder") return "#0e7490";
+        }
+        return "#94a3b8";
+    };
+
+    const getNodeRectStrokeWidth = (d) => {
+        const mt = getNodeMatchType(d);
+        if (mt) {
+            if (d.id === activeMatchId) return 3.5;
+            return 2.5;
+        }
+        return 1;
+    };
+
+    const getNodeFilter = (d) => {
+        if (!isSearchActive) return null;
+        if (d.id === activeMatchId) return "url(#glow-active)";
+        if (getNodeMatchType(d)) return "url(#glow-amber)";
+        return null;
+    };
+
+    const getNodeTextFill = (d) => {
+        const mt = getNodeMatchType(d);
+        if (mt) {
+            if (d.id === activeMatchId) return "#ffffff";
+            if (mt === "function") return "#0f172a"; // Deep bold black text on vivid amber gold
+            if (mt === "file" || mt === "folder") return "#ffffff";
+        }
+        if (isNodeHighlighted(d)) return "#f8fafc";
+        return "#1f2937";
+    };
+
     const nodesSelection = mainGroup.append("g").attr("class", "nodes")
         .selectAll("g").data(visibleNodeData).enter().append("g")
+        .attr("class", d => {
+            const mt = getNodeMatchType(d);
+            let cls = "node-g";
+            if (mt) {
+                cls += ` search-match search-match-${mt}`;
+                if (d.id === activeMatchId) cls += " search-match-active";
+            }
+            return cls;
+        })
         .attr("transform", (d) => {
             const position = positions.get(d.id);
             return `translate(${position.x - d.width / 2}, ${position.y - d.height / 2})`;
         });
 
     nodesSelection.append("rect")
+        .attr("class", "node-rect")
         .attr("width", d => d.width).attr("height", d => d.height)
-        .attr("rx", 6).attr("fill", d => (isNodeHighlighted(d) ? "#2563eb" : "#e2e8f0"))
-        .attr("stroke", "#94a3b8");
+        .attr("rx", 6)
+        .attr("fill", d => getNodeRectFill(d))
+        .attr("stroke", d => getNodeRectStroke(d))
+        .attr("stroke-width", d => getNodeRectStrokeWidth(d))
+        .attr("filter", d => getNodeFilter(d));
 
-    nodesSelection.append("text")
+    // Outer pulsing ring for active search match
+    nodesSelection.filter(d => d.id === activeMatchId)
+        .append("rect")
+        .attr("class", "search-active-pulse")
+        .attr("x", -4).attr("y", -4)
+        .attr("width", d => d.width + 8).attr("height", d => d.height + 8)
+        .attr("rx", 9)
+        .attr("fill", "none")
+        .attr("stroke", "#ea580c")
+        .attr("stroke-width", 2.5)
+        .attr("stroke-dasharray", "4,3")
+        .style("pointer-events", "none");
+
+    const textNodes = nodesSelection.append("text")
         .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
-        .attr("text-anchor", "middle").attr("font-size", "12px").attr("fill", d => (isNodeHighlighted(d) ? "#f8fafc" : "#1f2937"))
-        .selectAll("tspan")
-        .data(d => d.lines.map(line => ({ line, width: d.width, lineCount: d.lines.length })))
+        .attr("text-anchor", "middle").attr("font-size", "12px")
+        .attr("fill", d => getNodeTextFill(d));
+
+    textNodes.selectAll("tspan")
+        .data(d => d.lines.map((line, idx) => ({
+            line,
+            idx,
+            isFuncLine: idx === d.lines.length - 1,
+            matchType: getNodeMatchType(d),
+            isActiveMatch: d.id === activeMatchId,
+            width: d.width
+        })))
         .enter().append("tspan")
         .attr("x", d => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
+        .attr("font-weight", d => {
+            if (d.isActiveMatch) return "800";
+            if (d.matchType === "function" && d.isFuncLine) return "800";
+            if (d.matchType) return "700";
+            return "normal";
+        })
         .text(d => d.line);
 
     // --- Interaction Attachments & Zoom ---
@@ -678,11 +839,37 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         state.needsFitToScreen = false;
     }
 
+    state.currentZoomBehavior = zoom;
+    state.nodePositions = positions;
+    state.nodeDims = nodeDims;
+    state.viewportDims = { width: viewportWidth, height: viewportHeight };
+
     // Apply the saved or actively compensated zoom seamlessly
     svg.call(zoom.transform, state.currentZoomTransform);
     mainGroup.attr("transform", state.currentZoomTransform);
 
-    attachInteractions(nodesSelection, edgesSelection, edges, svg);
+    // If focusing on a search node, smoothly pan to it
+    if (options && options.focusSearchNodeId && positions.has(options.focusSearchNodeId)) {
+        const targetPos = positions.get(options.focusSearchNodeId);
+        const currentScale = state.currentZoomTransform.k;
+        const targetScale = Math.max(currentScale, 0.75);
+
+        const targetTx = (viewportWidth / 2) - targetPos.x * targetScale;
+        const targetTy = (viewportHeight / 2) - targetPos.y * targetScale;
+        const targetTransform = d3.zoomIdentity.translate(targetTx, targetTy).scale(targetScale);
+
+        state.currentZoomTransform = targetTransform;
+        if (options.animateToNode !== false) {
+            svg.transition()
+                .duration(500)
+                .ease(d3.easeCubicOut)
+                .call(zoom.transform, targetTransform);
+        } else {
+            svg.call(zoom.transform, targetTransform);
+        }
+    }
+
+    attachInteractions(nodesSelection, edgesSelection, edges, svg, state);
 }
 
 function renderError(message, containerSel) {
@@ -741,20 +928,30 @@ function getAllConnected(startId, edges, reverseEdges) {
     return connected;
 }
 
-function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl) {
+function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, state) {
     const reverseEdgesMap = buildReverseEdges(edgesMap);
     let activeClickedNodeId = null;
 
+    const isSearchActive = () => !!(state && state.searchState && state.searchState.matchingNodeIds && state.searchState.matchingNodeIds.size > 0);
+
     function updateHighlightState(activeSet) {
         if (!activeSet) {
-            nodesSelection.style("opacity", 1);
-            edgesSelection.style("opacity", 1);
+            if (isSearchActive()) {
+                nodesSelection.style("opacity", d => state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
+                edgesSelection.style("opacity", 0.15);
+            } else {
+                nodesSelection.style("opacity", 1);
+                edgesSelection.style("opacity", 1);
+            }
             return;
         }
 
         nodesSelection.style("opacity", d => activeSet.has(d.id) ? 1 : 0.15);
         edgesSelection.style("opacity", d => (activeSet.has(d.fromId) && activeSet.has(d.toId)) ? 1 : 0.05);
     }
+
+    // Apply initial search dimming if search is active
+    updateHighlightState(null);
 
     nodesSelection
         .style("cursor", "pointer")
@@ -827,4 +1024,241 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl) {
         const ctxMenu = document.getElementById("context-menu");
         if (ctxMenu) ctxMenu.style.display = "none";
     });
+}
+
+// --- Search Engine Implementation ---
+
+function executeSearch(query, state, container, options) {
+    const q = (query || "").trim().toLowerCase();
+    if (!q) {
+        state.searchState = null;
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, {
+            ...options,
+            animateToNode: false
+        });
+        return { count: 0, currentIndex: -1, matches: [] };
+    }
+
+    if (!state.currentGraphData) {
+        return { count: 0, currentIndex: -1, matches: [] };
+    }
+
+    const { depthById, nodes, levels, edges } = state.currentGraphData;
+    const matches = [];
+
+    // Search reachable nodes in the current graph
+    for (const [id, depth] of depthById.entries()) {
+        if (String(id).startsWith("dummy|")) continue;
+
+        const rawLabel = nodes.get(id) || id;
+        const labelInfo = parseNodeLabel(rawLabel);
+        const func = (labelInfo.lines[labelInfo.lines.length - 1] || "").trim();
+        const file = (labelInfo.file || "").trim();
+        const folder = (labelInfo.folder || "").trim();
+        const fileKey = makeFileKey(folder, file);
+
+        const funcLower = func.toLowerCase();
+        const fileLower = file.toLowerCase();
+        const folderLower = folder.toLowerCase();
+
+        let matchType = null;
+        let rank = 100;
+
+        // "function names are the most important" -> prioritized top ranks
+        if (funcLower === q) {
+            matchType = "function";
+            rank = 1; // exact match
+        } else if (funcLower.startsWith(q)) {
+            matchType = "function";
+            rank = 2; // prefix match
+        } else if (funcLower.includes(q)) {
+            matchType = "function";
+            rank = 3; // substring match
+        } else if (fileLower === q) {
+            matchType = "file";
+            rank = 10;
+        } else if (fileLower.includes(q)) {
+            matchType = "file";
+            rank = 11;
+        } else if (folderLower === q) {
+            matchType = "folder";
+            rank = 20;
+        } else if (folderLower.includes(q)) {
+            matchType = "folder";
+            rank = 21;
+        }
+
+        if (matchType) {
+            matches.push({
+                id,
+                type: matchType,
+                rank,
+                func,
+                file,
+                folder,
+                fileKey,
+                depth
+            });
+        }
+    }
+
+    // Sort matches: functions first (by rank), then alphabetically by func, then depth
+    matches.sort((a, b) => {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        const cmp = a.func.localeCompare(b.func);
+        if (cmp !== 0) return cmp;
+        return a.depth - b.depth;
+    });
+
+    if (matches.length === 0) {
+        state.searchState = {
+            query: q,
+            matches: [],
+            currentIndex: -1,
+            matchingNodeIds: new Set(),
+            matchingTypes: new Map()
+        };
+        renderGraph(levels, depthById, nodes, edges, container, state, {
+            ...options,
+            animateToNode: false
+        });
+        return { count: 0, currentIndex: -1, matches: [] };
+    }
+
+    // "if the folder or file is closed, open it, so it is visible for sure"
+    matches.forEach(m => {
+        if (m.folder) {
+            state.collapsedFolders.delete(m.folder);
+        }
+        if (m.fileKey) {
+            state.collapsedFiles.delete(m.fileKey);
+        }
+    });
+
+    const currentIndex = 0;
+    state.searchState = {
+        query: q,
+        matches,
+        currentIndex,
+        matchingNodeIds: new Set(matches.map(m => m.id)),
+        matchingTypes: new Map(matches.map(m => [m.id, m.type]))
+    };
+
+    renderGraph(levels, depthById, nodes, edges, container, state, {
+        ...options,
+        collapseAllOnInit: false,
+        focusSearchNodeId: matches[0].id,
+        animateToNode: true
+    });
+
+    return {
+        count: matches.length,
+        currentIndex: 0,
+        matches
+    };
+}
+
+function jumpToMatch(index, state, container, options) {
+    if (!state.searchState || !state.searchState.matches || state.searchState.matches.length === 0) {
+        return null;
+    }
+    const matches = state.searchState.matches;
+    const clampedIndex = (index % matches.length + matches.length) % matches.length;
+    state.searchState.currentIndex = clampedIndex;
+    const target = matches[clampedIndex];
+
+    // Ensure folder and file are open
+    let needsReRender = false;
+    if (target.folder && state.collapsedFolders.has(target.folder)) {
+        state.collapsedFolders.delete(target.folder);
+        needsReRender = true;
+    }
+    if (target.fileKey && state.collapsedFiles.has(target.fileKey)) {
+        state.collapsedFiles.delete(target.fileKey);
+        needsReRender = true;
+    }
+
+    if (needsReRender) {
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, {
+            ...options,
+            collapseAllOnInit: false,
+            focusSearchNodeId: target.id,
+            animateToNode: true
+        });
+    } else {
+        updateActiveSearchMatchInDOM(container, state, target.id);
+    }
+
+    return {
+        count: matches.length,
+        currentIndex: clampedIndex,
+        matches
+    };
+}
+
+function updateActiveSearchMatchInDOM(container, state, targetId) {
+    const searchState = state.searchState;
+    if (!searchState) return;
+
+    const nodesGroup = container.select("g.nodes");
+    if (nodesGroup.empty()) return;
+
+    // Remove old active pulse rings
+    nodesGroup.selectAll(".search-active-pulse").remove();
+
+    // Update node groups in-place
+    nodesGroup.selectAll("g.node-g").each(function(d) {
+        const isTarget = d.id === targetId;
+        const mt = searchState.matchingTypes.get(d.id);
+        const g = d3.select(this);
+
+        if (mt) {
+            g.classed("search-match-active", isTarget);
+            const rect = g.select("rect.node-rect");
+            const text = g.select("text");
+
+            if (isTarget) {
+                rect.attr("fill", "#ff5722")
+                    .attr("stroke", "#b91c1c")
+                    .attr("stroke-width", 3.5)
+                    .attr("filter", "url(#glow-active)");
+                text.attr("fill", "#ffffff");
+
+                // Add active pulsing ring
+                g.append("rect")
+                    .attr("class", "search-active-pulse")
+                    .attr("x", -4).attr("y", -4)
+                    .attr("width", d.width + 8).attr("height", d.height + 8)
+                    .attr("rx", 9)
+                    .attr("fill", "none")
+                    .attr("stroke", "#ea580c")
+                    .attr("stroke-width", 2.5)
+                    .attr("stroke-dasharray", "4,3")
+                    .style("pointer-events", "none");
+            } else {
+                rect.attr("fill", mt === "function" ? "#f59e0b" : (mt === "file" ? "#8b5cf6" : "#06b6d4"))
+                    .attr("stroke", mt === "function" ? "#b45309" : (mt === "file" ? "#5b21b6" : "#0e7490"))
+                    .attr("stroke-width", 2.5)
+                    .attr("filter", "url(#glow-amber)");
+                text.attr("fill", mt === "function" ? "#0f172a" : "#ffffff");
+            }
+        }
+    });
+
+    // Pan camera smoothly
+    const pos = state.nodePositions?.get(targetId);
+    if (pos && state.currentZoomBehavior) {
+        const currentScale = state.currentZoomTransform.k;
+        const targetScale = Math.max(currentScale, 0.75);
+        const vp = state.viewportDims || { width: 800, height: 600 };
+        const targetTx = (vp.width / 2) - pos.x * targetScale;
+        const targetTy = (vp.height / 2) - pos.y * targetScale;
+        const targetTransform = d3.zoomIdentity.translate(targetTx, targetTy).scale(targetScale);
+
+        state.currentZoomTransform = targetTransform;
+        container.select("svg").transition()
+            .duration(450)
+            .ease(d3.easeCubicOut)
+            .call(state.currentZoomBehavior.transform, targetTransform);
+    }
 }

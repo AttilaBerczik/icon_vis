@@ -31,11 +31,172 @@
         }
 
         /* --- Main View Header --- */
+        #main-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
         #main-header h1 {
             color: #1e293b;
             font-size: 15px;
             font-weight: 700;
             margin: 0;
+            white-space: nowrap;
+        }
+
+        /* --- Graph Search Bar --- */
+        .graph-search-container {
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .search-input-wrapper {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 2px 6px 2px 8px;
+            gap: 6px;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .search-input-wrapper:focus-within {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .search-input-wrapper.has-error {
+            border-color: #ef4444;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+        }
+
+        .search-icon {
+            font-size: 13px;
+            color: #94a3b8;
+            user-select: none;
+            display: flex;
+            align-items: center;
+        }
+
+        #graph-search-input {
+            border: none;
+            outline: none;
+            background: transparent;
+            font-family: inherit;
+            font-size: 12px;
+            color: #1e293b;
+            width: 260px;
+            padding: 3px 0;
+            transition: width 0.2s ease;
+        }
+
+        #graph-search-input:focus {
+            width: 310px;
+        }
+
+        #graph-search-input::placeholder {
+            color: #94a3b8;
+            font-size: 11.5px;
+        }
+
+        .search-match-count {
+            display: inline-flex;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 1px 7px;
+            border-radius: 10px;
+            background: #f1f5f9;
+            color: #475569;
+            white-space: nowrap;
+            user-select: none;
+            line-height: 1.4;
+        }
+
+        .search-match-count.has-matches {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+
+        .search-match-count.no-matches {
+            background: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+
+        .search-nav-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: #64748b;
+            font-size: 10px;
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            transition: all 0.15s ease;
+        }
+
+        .search-nav-btn:hover {
+            background: #f1f5f9;
+            color: #0f172a;
+            border-color: #cbd5e1;
+        }
+
+        .search-nav-btn:active {
+            background: #e2e8f0;
+            transform: scale(0.95);
+        }
+
+        .search-clear-btn {
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            color: #94a3b8;
+            font-size: 12px;
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            transition: all 0.15s ease;
+        }
+
+        .search-clear-btn:hover {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+        }
+
+        /* --- SVG Search Highlighting Animations --- */
+        @keyframes activeMatchPulse {
+            0% {
+                stroke-opacity: 0.95;
+                stroke-width: 2.5px;
+            }
+            50% {
+                stroke-opacity: 0.35;
+                stroke-width: 5px;
+            }
+            100% {
+                stroke-opacity: 0.95;
+                stroke-width: 2.5px;
+            }
+        }
+
+        .search-active-pulse {
+            animation: activeMatchPulse 1.3s infinite ease-in-out;
+            pointer-events: none;
         }
 
         /* --- Sub-graph Header --- */
@@ -479,6 +640,16 @@
                 <!-- Main view header (hidden in sub-graph mode) -->
                 <div id="main-header">
                     <h1>icon.f90 Call Graph</h1>
+                    <div id="graph-search-container" class="graph-search-container">
+                        <div class="search-input-wrapper">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="graph-search-input" placeholder="Search function, file, folder... (Ctrl+F)" autocomplete="off" spellcheck="false">
+                            <span id="search-match-count" class="search-match-count" style="display:none;"></span>
+                            <button type="button" id="search-btn-prev" class="search-nav-btn" title="Previous match (Shift+Enter)" style="display:none;">▲</button>
+                            <button type="button" id="search-btn-next" class="search-nav-btn" title="Next match (Enter)" style="display:none;">▼</button>
+                            <button type="button" id="search-btn-clear" class="search-clear-btn" title="Clear search (Esc)" style="display:none;">✕</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Sub-graph header (hidden in main mode) -->

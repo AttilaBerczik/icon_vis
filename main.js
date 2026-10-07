@@ -56,6 +56,8 @@ function renderMainMode(nodes, edges) {
 
     const { levels, depthById } = buildLevels(rootId, edges, nodes);
     renderGraph(levels, depthById, nodes, edges, container, state, { collapseAllOnInit: true });
+
+    setupSearchUI(container.node());
 }
 
 function renderSubGraphMode(nodeId, nodes, edges) {
@@ -268,3 +270,136 @@ document.addEventListener("keydown", (e) => {
         }
     }
 });
+
+// --- Main View Search Bar Controller ---
+
+function setupSearchUI(visContainerNode) {
+    const searchInput = document.getElementById("graph-search-input");
+    const countBadge = document.getElementById("search-match-count");
+    const btnPrev = document.getElementById("search-btn-prev");
+    const btnNext = document.getElementById("search-btn-next");
+    const btnClear = document.getElementById("search-btn-clear");
+    const wrapper = searchInput ? searchInput.closest(".search-input-wrapper") : null;
+
+    if (!searchInput) return;
+
+    let debounceTimer = null;
+
+    function updateUI(res) {
+        if (!res || res.count === 0) {
+            const rawVal = searchInput.value.trim();
+            if (rawVal.length === 0) {
+                countBadge.style.display = "none";
+                btnPrev.style.display = "none";
+                btnNext.style.display = "none";
+                btnClear.style.display = "none";
+                wrapper?.classList.remove("has-error");
+            } else {
+                countBadge.style.display = "inline-flex";
+                countBadge.className = "search-match-count no-matches";
+                countBadge.textContent = "0 matches";
+                countBadge.title = "No matching function, file, or folder found";
+                btnPrev.style.display = "none";
+                btnNext.style.display = "none";
+                btnClear.style.display = "inline-flex";
+                wrapper?.classList.add("has-error");
+            }
+            return;
+        }
+
+        wrapper?.classList.remove("has-error");
+        btnClear.style.display = "inline-flex";
+        btnPrev.style.display = "inline-flex";
+        btnNext.style.display = "inline-flex";
+        countBadge.style.display = "inline-flex";
+        countBadge.className = "search-match-count has-matches";
+
+        const currentNum = (res.currentIndex >= 0 ? res.currentIndex + 1 : 1);
+        const currentMatch = res.matches ? res.matches[res.currentIndex] : null;
+        const typeHint = currentMatch ? ` (${currentMatch.type})` : "";
+        countBadge.textContent = `${currentNum} / ${res.count}${typeHint}`;
+        countBadge.title = currentMatch ? `Match ${currentNum} of ${res.count} [${currentMatch.type}]: ${currentMatch.func} in ${currentMatch.file || currentMatch.folder}` : "";
+    }
+
+    function doSearch(query) {
+        if (!visContainerNode || typeof visContainerNode.search !== "function") return;
+        const res = visContainerNode.search(query);
+        updateUI(res);
+    }
+
+    searchInput.addEventListener("input", (e) => {
+        clearTimeout(debounceTimer);
+        const query = e.target.value;
+        if (!query.trim()) {
+            if (visContainerNode && typeof visContainerNode.clearSearch === "function") {
+                visContainerNode.clearSearch();
+            }
+            updateUI({ count: 0 });
+            return;
+        }
+        debounceTimer = setTimeout(() => {
+            doSearch(query);
+        }, 220);
+    });
+
+    searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            clearTimeout(debounceTimer);
+            const query = searchInput.value.trim();
+            if (!query) return;
+
+            const currentState = visContainerNode?.getSearchState?.();
+            if (currentState && currentState.query === query.toLowerCase() && currentState.matches.length > 0) {
+                // If query is already active, cycle next (or Shift+Enter for prev)
+                const res = e.shiftKey ? visContainerNode.prevMatch() : visContainerNode.nextMatch();
+                updateUI(res);
+            } else {
+                doSearch(query);
+            }
+        } else if (e.key === "Escape") {
+            searchInput.value = "";
+            if (visContainerNode && typeof visContainerNode.clearSearch === "function") {
+                visContainerNode.clearSearch();
+            }
+            updateUI({ count: 0 });
+            searchInput.blur();
+        }
+    });
+
+    btnNext?.addEventListener("click", () => {
+        if (visContainerNode && typeof visContainerNode.nextMatch === "function") {
+            const res = visContainerNode.nextMatch();
+            updateUI(res);
+        }
+    });
+
+    btnPrev?.addEventListener("click", () => {
+        if (visContainerNode && typeof visContainerNode.prevMatch === "function") {
+            const res = visContainerNode.prevMatch();
+            updateUI(res);
+        }
+    });
+
+    btnClear?.addEventListener("click", () => {
+        searchInput.value = "";
+        if (visContainerNode && typeof visContainerNode.clearSearch === "function") {
+            visContainerNode.clearSearch();
+        }
+        updateUI({ count: 0 });
+        searchInput.focus();
+    });
+
+    // Global shortcut Ctrl+F / Cmd+F to focus graph search input
+    document.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+            // Only capture if user is in main view and not in detail panel or another text input
+            const mainHeader = document.getElementById("main-header");
+            if (mainHeader && mainHeader.style.display !== "none") {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+    });
+}
