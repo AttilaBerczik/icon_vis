@@ -33,7 +33,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     const xSpacingBetweenNodes = 30;
     const defaultYSpacing = 160;
     const minLaneGap = 4;
-    const margin = { top: 60, right: 60, bottom: 60, left: 60 };
+    const margin = focusNodeId ? { top: 24, right: 24, bottom: 24, left: 24 } : { top: 32, right: 32, bottom: 32, left: 32 };
 
     const COLLAPSED_WIDTH = 16; // The "one wide" internal logic width
 
@@ -406,8 +406,12 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     });
 
     const containerNode = container.node();
-    const viewportWidth = containerNode.clientWidth || window.innerWidth - 40;
-    const viewportHeight = containerNode.clientHeight || 600;
+    const detailPanelParent = containerNode ? containerNode.closest("#detail-panel") : null;
+    const fallbackWidth = detailPanelParent
+        ? (detailPanelParent.clientWidth || 540)
+        : (document.getElementById("left-panel")?.clientWidth || window.innerWidth - 16);
+    const viewportWidth = (containerNode && containerNode.clientWidth > 0) ? containerNode.clientWidth : fallbackWidth;
+    const viewportHeight = (containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : (document.getElementById("graph-split-container")?.clientHeight || window.innerHeight - 48);
 
     const svg = container.append("svg").attr("width", "100%").attr("height", "100%");
     const mainGroup = svg.append("g").attr("class", "main-zoom-group");
@@ -421,6 +425,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("y1", (_, depth) => depthY[depth]).attr("y2", (_, depth) => depthY[depth])
         .attr("stroke", "#e2e8f0").attr("stroke-width", 1);
     const edgesGroup = mainGroup.append("g").attr("class", "edges");
+
+    // Apply current toggle states if controls exist
+    const showEdges = document.getElementById("toggle-edges");
+    if (showEdges && !showEdges.checked) edgesGroup.style("display", "none");
+    const showBoxes = document.getElementById("toggle-boxes");
+    if (showBoxes && !showBoxes.checked) fileBoxesGroup.style("display", "none");
+    const showFolderBoxes = document.getElementById("toggle-folder-boxes");
+    if (showFolderBoxes && !showFolderBoxes.checked) folderBoxesGroup.style("display", "none");
 
     // --- Render Folders ---
     const folderRects = folderBoxesGroup.selectAll("g.folder-box").data(folderBoxData).enter().append("g").attr("class", "folder-box");
@@ -580,12 +592,46 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     svg.call(zoom);
 
     if (state.isInitialRender) {
-        const paddingFit = 40;
-        const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
-        const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
-        const initialScale = Math.min(scaleX, scaleY, 1);
-        const tx = (viewportWidth - svgWidth * initialScale) / 2;
-        const ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
+        let initialScale = 1;
+        let tx = 0;
+        let ty = 0;
+
+        if (focusNodeId && positions.has(focusNodeId)) {
+            const focusPos = positions.get(focusNodeId);
+            const paddingFit = 16;
+            const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
+            const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+
+            // Maintain a comfortable, legible zoom for the focused sub-graph
+            initialScale = Math.min(1, Math.max(0.65, Math.min(scaleX, scaleY)));
+            if (scaleX > 0.8 && scaleY > 0.8) {
+                initialScale = Math.min(scaleX, scaleY, 1);
+            }
+
+            // Always center the focused node horizontally in the exact middle of the viewport
+            tx = (viewportWidth / 2) - focusPos.x * initialScale;
+
+            // Vertically position the focused node
+            const focusNode = nodeData.find(d => d.id === focusNodeId);
+            const isBottomNode = focusNode && focusNode.depth === levels.length - 1 && levels.length > 1;
+
+            if (svgHeightComputed * initialScale <= viewportHeight - 40) {
+                ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
+            } else if (isBottomNode) {
+                // Callers view: place focused node near bottom so callers above are visible
+                ty = (viewportHeight - 70) - focusPos.y * initialScale;
+            } else {
+                // Callees view: place focused node near top so callees below are visible
+                ty = 36 - focusPos.y * initialScale;
+            }
+        } else {
+            const paddingFit = 20;
+            const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
+            const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+            initialScale = Math.min(scaleX, scaleY, 1);
+            tx = (viewportWidth - svgWidth * initialScale) / 2;
+            ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
+        }
 
         state.currentZoomTransform = d3.zoomIdentity.translate(tx, ty).scale(initialScale);
         state.isInitialRender = false;
@@ -707,7 +753,7 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl) {
 
             const functionName = d.lines[d.lines.length - 1];
             const ctxLabel = document.getElementById("ctx-open-tab");
-            if (ctxLabel) ctxLabel.textContent = `🔍 Open "${functionName}" in New Tab`;
+            if (ctxLabel) ctxLabel.textContent = `🔍 Open "${functionName}" in Side Tab`;
 
             ctxMenu.style.display = "block";
             ctxMenu.style.left = event.clientX + "px";

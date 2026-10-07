@@ -9,27 +9,45 @@
 
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            background-color: #f5f5f5;
-            padding: 12px 20px;
+            background-color: #f8fafc;
+            padding: 4px;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Left Header Bar --- */
+        #left-header-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 10px;
+            background: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-height: 38px;
+            flex-shrink: 0;
         }
 
         /* --- Main View Header --- */
         #main-header h1 {
-            color: #333;
-            font-size: 20px;
-            margin-bottom: 8px;
+            color: #1e293b;
+            font-size: 15px;
+            font-weight: 700;
+            margin: 0;
         }
 
         /* --- Sub-graph Header --- */
         #subgraph-header {
             display: none;
             align-items: center;
-            gap: 14px;
-            padding: 10px 18px;
+            gap: 10px;
+            padding: 2px 8px;
             background: linear-gradient(135deg, #1e293b, #0f172a);
             color: #f1f5f9;
-            border-radius: 10px;
-            margin-bottom: 10px;
+            border-radius: 6px;
+            margin: 0;
             flex-wrap: wrap;
         }
 
@@ -37,9 +55,9 @@
             color: #60a5fa;
             text-decoration: none;
             font-weight: 600;
-            font-size: 14px;
-            padding: 4px 10px;
-            border-radius: 6px;
+            font-size: 13px;
+            padding: 2px 6px;
+            border-radius: 4px;
             transition: background 0.2s;
         }
         #back-link:hover {
@@ -48,24 +66,24 @@
         }
 
         #subgraph-node-name {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 700;
             flex-grow: 1;
         }
 
         #subgraph-tabs {
             display: flex;
-            gap: 6px;
+            gap: 4px;
         }
 
         .tab-btn {
-            padding: 5px 14px;
+            padding: 3px 10px;
             border: 1px solid #475569;
             background: transparent;
             color: #94a3b8;
-            border-radius: 6px;
+            border-radius: 5px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             transition: all 0.2s;
         }
@@ -81,16 +99,276 @@
 
         /* --- Shared Controls --- */
         #controls {
-            margin-bottom: 10px;
-            font-size: 13px;
-            color: #555;
+            margin: 0;
+            font-size: 12px;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
         }
         #controls label {
-            margin-right: 15px;
+            margin-right: 0;
             cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
 
         /* --- Visualization Containers --- */
+        #graph-split-container {
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            height: calc(100vh - 8px);
+            overflow: hidden;
+            position: relative;
+            gap: 4px;
+        }
+
+        #left-panel {
+            flex: 1 1 0;
+            min-width: 260px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        /* --- Panel Resizer --- */
+        .panel-resizer {
+            width: 6px;
+            cursor: col-resize;
+            background: #e2e8f0;
+            user-select: none;
+            flex-shrink: 0;
+            z-index: 20;
+            transition: background 0.15s;
+            position: relative;
+            border-radius: 3px;
+        }
+        .panel-resizer:hover, body.resizing .panel-resizer {
+            background: #3b82f6;
+        }
+        .panel-resizer::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 2px;
+            height: 24px;
+            background: #94a3b8;
+            border-radius: 1px;
+        }
+        .panel-resizer:hover::after, body.resizing .panel-resizer::after {
+            background: #ffffff;
+        }
+        body.resizing {
+            cursor: col-resize !important;
+            user-select: none !important;
+        }
+
+        /* --- Detail Panel --- */
+        #detail-panel {
+            flex: 0 0 540px;
+            min-width: 320px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            z-index: 10;
+        }
+
+        #detail-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #1e293b;
+            color: #f1f5f9;
+            padding: 3px 8px;
+            border-bottom: 1px solid #334155;
+            min-height: 38px;
+            flex-shrink: 0;
+        }
+
+        .detail-tab-bar {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            scrollbar-width: thin;
+            flex: 1;
+            align-items: center;
+            margin-right: 8px;
+            padding-bottom: 1px;
+        }
+        .detail-tab-bar::-webkit-scrollbar {
+            height: 4px;
+        }
+        .detail-tab-bar::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 2px;
+        }
+
+        .detail-tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 12px;
+            background: #334155;
+            color: #94a3b8;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s ease;
+            user-select: none;
+            max-width: 220px;
+            border: 1px solid transparent;
+        }
+        .detail-tab:hover {
+            background: #475569;
+            color: #f8fafc;
+        }
+        .detail-tab.active {
+            background: #0f172a;
+            color: #38bdf8;
+            border-color: #38bdf8;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .detail-tab-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .detail-tab-close {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            font-size: 14px;
+            line-height: 1;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .detail-tab-close:hover {
+            background: rgba(239, 68, 68, 0.25);
+            color: #ef4444;
+        }
+
+        .panel-close-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .panel-close-btn:hover {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        @keyframes tabPulse {
+            0% { transform: scale(1); background-color: #38bdf8; color: #fff; }
+            50% { transform: scale(1.08); background-color: #0284c7; color: #fff; }
+            100% { transform: scale(1); }
+        }
+        .tab-highlight-pulse {
+            animation: tabPulse 0.5s ease-out;
+        }
+
+        .detail-content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+            background: #f8fafc;
+        }
+
+        .tab-content-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .tab-sub-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            background: #f1f5f9;
+            border-bottom: 1px solid #e2e8f0;
+            flex-shrink: 0;
+            gap: 12px;
+        }
+
+        .tab-sub-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1e293b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tab-sub-nav {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .tab-sub-btn {
+            padding: 4px 10px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #64748b;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.15s;
+        }
+        .tab-sub-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+        .tab-sub-btn:hover:not(.active) {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+
+        .tab-sub-body {
+            flex: 1;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
         .viz-container {
             background-color: white;
             border: 1px solid #ddd;
@@ -98,9 +376,13 @@
             padding: 0;
             display: block;
             width: 100%;
-            height: calc(100vh - 120px);
+            height: 100%;
             overflow: hidden;
             cursor: grab;
+        }
+        .viz-container.tab-viz {
+            border: none;
+            border-radius: 0;
         }
         .viz-container:active {
             cursor: grabbing;
@@ -151,38 +433,58 @@
     </style>
 </head>
 <body>
-    <!-- Main view header (hidden in sub-graph mode) -->
-    <div id="main-header">
-        <h1>icon.f90 Call Graph</h1>
-    </div>
+    <!-- Split view container -->
+    <div id="graph-split-container">
+        <!-- Left panel: Main visualization (or standalone sub-graph visualization) -->
+        <div id="left-panel">
+            <div id="left-header-bar">
+                <!-- Main view header (hidden in sub-graph mode) -->
+                <div id="main-header">
+                    <h1>icon.f90 Call Graph</h1>
+                </div>
 
-    <!-- Sub-graph header (hidden in main mode) -->
-    <div id="subgraph-header">
-        <a href="index.html" id="back-link">← Back to Main View</a>
-        <span id="subgraph-node-name"></span>
-        <div id="subgraph-tabs">
-            <button id="tab-callees" class="tab-btn active">▼ Callees</button>
-            <button id="tab-callers" class="tab-btn">▲ Callers</button>
+                <!-- Sub-graph header (hidden in main mode) -->
+                <div id="subgraph-header">
+                    <a href="index.html" id="back-link">← Main View</a>
+                    <span id="subgraph-node-name"></span>
+                    <div id="subgraph-tabs">
+                        <button id="tab-callees" class="tab-btn active">▼ Callees</button>
+                        <button id="tab-callers" class="tab-btn">▲ Callers</button>
+                    </div>
+                </div>
+
+                <!-- Shared controls -->
+                <div id="controls">
+                    <label><input type="checkbox" id="toggle-edges" checked> Edges</label>
+                    <label><input type="checkbox" id="toggle-orthogonal"> Orthogonal</label>
+                    <label><input type="checkbox" id="toggle-boxes" checked> File Boxes</label>
+                    <label><input type="checkbox" id="toggle-folder-boxes" checked> Folder Boxes</label>
+                </div>
+            </div>
+
+            <!-- Callees / main visualization -->
+            <div id="visualization" class="viz-container"></div>
+
+            <!-- Callers visualization (only used in sub-graph mode) -->
+            <div id="visualization-callers" class="viz-container" style="display:none;"></div>
+        </div>
+
+        <!-- Draggable resizer -->
+        <div id="panel-resizer" class="panel-resizer" style="display:none;"></div>
+
+        <!-- Right panel: Multi-tab detail panel -->
+        <div id="detail-panel" style="display:none;">
+            <div id="detail-panel-header">
+                <div id="detail-tab-bar" class="detail-tab-bar"></div>
+                <button id="detail-panel-close-btn" class="panel-close-btn" title="Close Side Panel">✕</button>
+            </div>
+            <div id="detail-content-area" class="detail-content-area"></div>
         </div>
     </div>
 
-    <!-- Shared controls -->
-    <div id="controls">
-        <label><input type="checkbox" id="toggle-edges" checked> Show Edges</label>
-        <label><input type="checkbox" id="toggle-orthogonal"> Orthogonal Edges</label>
-        <label><input type="checkbox" id="toggle-boxes" checked> Show File Bounding Boxes</label>
-        <label><input type="checkbox" id="toggle-folder-boxes" checked> Show Folder Bounding Boxes</label>
-    </div>
-
-    <!-- Callees / main visualization -->
-    <div id="visualization" class="viz-container"></div>
-
-    <!-- Callers visualization (only used in sub-graph mode) -->
-    <div id="visualization-callers" class="viz-container" style="display:none;"></div>
-
     <!-- Context menu (hidden by default, positioned on right-click) -->
     <div id="context-menu">
-        <div id="ctx-open-tab">🔍 Open in New Tab</div>
+        <div id="ctx-open-tab">🔍 Open in Side Tab</div>
     </div>
 
     <!-- D3.js library from CDN -->
@@ -192,6 +494,7 @@
     <script src="parser.js"></script>
     <script src="layout.js"></script>
     <script src="render.js"></script>
+    <script src="panel.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

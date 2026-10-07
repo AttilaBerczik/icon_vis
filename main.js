@@ -15,6 +15,15 @@ fetch("callgraph_folders.dot")
     .then((dotText) => {
         const { nodes, edges } = parseDot(dotText);
 
+        // Keep pristine copies of nodes & edges for dynamic sub-graph views
+        const pristineNodes = cloneNodes(nodes);
+        const pristineEdges = cloneEdges(edges);
+
+        if (window.DetailPanelManager) {
+            window.detailPanelManager = new DetailPanelManager();
+            window.detailPanelManager.init(pristineNodes, pristineEdges);
+        }
+
         if (targetNodeId) {
             // --- SUB-GRAPH MODE ---
             renderSubGraphMode(targetNodeId, nodes, edges);
@@ -159,13 +168,20 @@ if (toggleOrthogonal) {
         if (visCallers && typeof visCallers.updateEdgeRouting === "function") {
             visCallers.updateEdgeRouting();
         }
+        if (window.detailPanelManager) {
+            window.detailPanelManager.updateEdgeRouting();
+        }
     });
 }
 
 // --- Context Menu Wiring ---
 document.getElementById("ctx-open-tab").addEventListener("click", () => {
     if (contextMenuNodeId) {
-        window.open(`index.html?nodeId=${encodeURIComponent(contextMenuNodeId)}`, '_blank');
+        if (window.detailPanelManager) {
+            window.detailPanelManager.openTab(contextMenuNodeId);
+        } else {
+            window.open(`index.html?nodeId=${encodeURIComponent(contextMenuNodeId)}`, '_blank');
+        }
     }
     document.getElementById("context-menu").style.display = "none";
 });
@@ -178,10 +194,14 @@ document.addEventListener("click", (e) => {
     }
 });
 
-// Dismiss on Escape
+// Dismiss on Escape (first close context menu if open, otherwise close active detail tab)
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         const ctxMenu = document.getElementById("context-menu");
-        if (ctxMenu) ctxMenu.style.display = "none";
+        if (ctxMenu && ctxMenu.style.display !== "none") {
+            ctxMenu.style.display = "none";
+        } else if (window.detailPanelManager && window.detailPanelManager.activeTabId) {
+            window.detailPanelManager.closeTab(window.detailPanelManager.activeTabId);
+        }
     }
 });
