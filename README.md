@@ -15,3 +15,6 @@ The visualization logic is split into multiple focused JavaScript files for bett
 * **`layout.js`**: Handles the heavy lifting for calculating graph layout. It breaks cycles using DFS, assigns nodes to strict downward layers using the Longest-Path algorithm, and inserts invisible "Dummy Nodes" for edges spanning multiple layers. It applies a **Node Promotion Heuristic** to push nodes to higher layers, deleting dummy nodes and compressing the graph's horizontal width. It then optimizes the layout via simulated annealing to minimize edge crossings within file columns.
 * **`render.js`**: Responsible for the visual representation using D3.js. It renders nodes, edges, horizontal level lines, and colored file and folder bounding boxes.
 * **`main.js`**: The central entry point that loads the `.dot` data, ties the parser, layout, and rendering logic together, and initializes UI event listeners.
+
+## Start
+Write `npx live-server` into the main folder and run it.
