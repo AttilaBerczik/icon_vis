@@ -55,7 +55,7 @@ function renderMainMode(nodes, edges) {
     const state = createGraphState();
 
     const { levels, depthById } = buildLevels(rootId, edges, nodes);
-    renderGraph(levels, depthById, nodes, edges, container, state);
+    renderGraph(levels, depthById, nodes, edges, container, state, { collapseAllOnInit: true });
 }
 
 function renderSubGraphMode(nodeId, nodes, edges) {
@@ -199,6 +199,42 @@ if (toggleOrthogonal) {
             window.detailPanelManager.updateEdgeRouting();
         }
     });
+}
+
+// --- Expand / Collapse Shorthand Controls ---
+function applyContainerAction(actionName) {
+    const visCombined = d3.select("#visualization").node();
+    const visCallees = d3.select("#visualization-callees").node();
+    const visCallers = d3.select("#visualization-callers").node();
+
+    const candidates = [visCombined, visCallees, visCallers].filter(
+        node => node && node.style.display !== "none" && typeof node[actionName] === "function"
+    );
+
+    if (candidates.length > 0) {
+        candidates.forEach(node => node[actionName]());
+    } else if (visCombined && typeof visCombined[actionName] === "function") {
+        visCombined[actionName]();
+    }
+
+    if (window.detailPanelManager && typeof window.detailPanelManager[actionName] === "function") {
+        window.detailPanelManager[actionName]();
+    }
+}
+
+const btnOpenAll = document.getElementById("btn-open-all");
+if (btnOpenAll) {
+    btnOpenAll.addEventListener("click", () => applyContainerAction("expandAll"));
+}
+
+const btnFoldersOnly = document.getElementById("btn-folders-only");
+if (btnFoldersOnly) {
+    btnFoldersOnly.addEventListener("click", () => applyContainerAction("expandFoldersOnly"));
+}
+
+const btnCloseAll = document.getElementById("btn-close-all");
+if (btnCloseAll) {
+    btnCloseAll.addEventListener("click", () => applyContainerAction("collapseAll"));
 }
 
 // --- Context Menu Wiring ---

@@ -8,6 +8,7 @@ function createGraphState() {
         collapsedFiles: new Set(),
         currentGraphData: null,
         isInitialRender: true,
+        needsFitToScreen: false,
         currentZoomTransform: d3.zoomIdentity,
         cachedLayout: null,
         targetElementToTrack: null,
@@ -87,6 +88,17 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
     // ---------------------------
+
+    // Collapse all folders and files on initial render
+    if (state.isInitialRender) {
+        const shouldCollapseAll = (options && options.collapseAllOnInit !== undefined)
+            ? options.collapseAllOnInit
+            : !focusNodeId;
+        if (shouldCollapseAll) {
+            orderedFolders.forEach(folder => collapsedFolders.add(folder));
+            fileOrder.forEach(file => collapsedFiles.add(file));
+        }
+    }
 
     // 2. Compute max column widths (ignoring collapsed state initially for base metrics)
     const maxNodesPerLevelByFile = new Map();
@@ -516,6 +528,30 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         edgesSelection.attr("d", (d) => buildPathLine(d, nodeDims, isOrthogonal));
     };
 
+    container.node().expandAll = function() {
+        state.collapsedFolders.clear();
+        state.collapsedFiles.clear();
+        state.needsFitToScreen = true;
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
+    };
+
+    container.node().collapseAll = function() {
+        state.collapsedFolders.clear();
+        state.collapsedFiles.clear();
+        orderedFolders.forEach(folder => state.collapsedFolders.add(folder));
+        fileOrder.forEach(file => state.collapsedFiles.add(file));
+        state.needsFitToScreen = true;
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
+    };
+
+    container.node().expandFoldersOnly = function() {
+        state.collapsedFolders.clear();
+        state.collapsedFiles.clear();
+        fileOrder.forEach(file => state.collapsedFiles.add(file));
+        state.needsFitToScreen = true;
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
+    };
+
     function buildPathLine(d, nodeDims, useOrthogonal) {
         const hFrom = nodeDims.get(d.fromId).h;
         const hTo = nodeDims.get(d.toId).h;
@@ -591,7 +627,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     svg.call(zoom);
 
-    if (state.isInitialRender) {
+    if (state.isInitialRender || state.needsFitToScreen) {
         let initialScale = 1;
         let tx = 0;
         let ty = 0;
@@ -639,6 +675,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
         state.currentZoomTransform = d3.zoomIdentity.translate(tx, ty).scale(initialScale);
         state.isInitialRender = false;
+        state.needsFitToScreen = false;
     }
 
     // Apply the saved or actively compensated zoom seamlessly

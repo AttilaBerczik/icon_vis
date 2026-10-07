@@ -115,6 +115,44 @@
             gap: 4px;
         }
 
+        .control-divider {
+            width: 1px;
+            height: 18px;
+            background-color: #cbd5e1;
+            margin: 0 4px;
+        }
+
+        .collapse-controls {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .control-btn {
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #334155;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            line-height: 1.2;
+        }
+
+        .control-btn:hover {
+            background: #e2e8f0;
+            color: #0f172a;
+            border-color: #94a3b8;
+        }
+
+        .control-btn:active {
+            background: #cbd5e1;
+            transform: scale(0.97);
+        }
+
         /* --- Visualization Containers --- */
         #graph-split-container {
             display: flex;
@@ -460,6 +498,12 @@
                     <label><input type="checkbox" id="toggle-orthogonal"> Orthogonal</label>
                     <label><input type="checkbox" id="toggle-boxes" checked> File Boxes</label>
                     <label><input type="checkbox" id="toggle-folder-boxes" checked> Folder Boxes</label>
+                    <span class="control-divider"></span>
+                    <div class="collapse-controls">
+                        <button type="button" id="btn-open-all" class="control-btn" title="Open everything: expand all folders and files">Open All</button>
+                        <button type="button" id="btn-folders-only" class="control-btn" title="Open every folder only: keep files collapsed">Folders Only</button>
+                        <button type="button" id="btn-close-all" class="control-btn" title="Close everything: collapse all folders and files">Close All</button>
+                    </div>
                 </div>
             </div>
 

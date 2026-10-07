@@ -261,6 +261,30 @@ class DetailPanelManager {
             }
         });
     }
+
+    expandAll() {
+        this.applyActionToActiveTab("expandAll");
+    }
+
+    collapseAll() {
+        this.applyActionToActiveTab("collapseAll");
+    }
+
+    expandFoldersOnly() {
+        this.applyActionToActiveTab("expandFoldersOnly");
+    }
+
+    applyActionToActiveTab(actionName) {
+        if (!this.contentArea) return;
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        if (!activeTab || !activeTab.contentContainer) return;
+        const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (node.style.display !== "none" && typeof node[actionName] === "function") {
+                node[actionName]();
+            }
+        });
+    }
 }
 
 /**
