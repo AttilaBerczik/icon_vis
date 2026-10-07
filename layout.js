@@ -656,3 +656,85 @@ function flipGraph(levels, depthById, edges) {
 
     return { levels: flippedLevels, depthById: flippedDepth, edges: flippedEdges };
 }
+
+function buildCombinedGraph(nodeId, nodes, edges) {
+    const origEdges = cloneEdges(edges);
+    const origNodes = cloneNodes(nodes);
+
+    // 1. Build Callers (above nodeId, flipped so callers are at top layers pointing to nodeId)
+    const reverseEdges = buildReverseEdgeMap(origEdges);
+    const callerNodes = cloneNodes(origNodes);
+    const { levels: rawCallerLevels, depthById: rawCallerDepth } = buildLevels(nodeId, reverseEdges, callerNodes);
+
+    let callerLevels, callerEdges, callerDepth;
+    const hasCallers = rawCallerLevels.length > 1;
+    if (hasCallers) {
+        const flipped = flipGraph(rawCallerLevels, rawCallerDepth, reverseEdges);
+        callerLevels = flipped.levels;
+        callerEdges = flipped.edges;
+        callerDepth = flipped.depthById;
+    } else {
+        callerLevels = [[nodeId]];
+        callerEdges = new Map();
+        callerDepth = new Map([[nodeId, 0]]);
+    }
+
+    // 2. Build Callees (below nodeId, pointing downward from nodeId)
+    const calleeEdges = cloneEdges(origEdges);
+    const calleeNodes = cloneNodes(origNodes);
+    const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, calleeEdges, calleeNodes);
+    const hasCallees = calleeLevels.length > 1;
+
+    const callerOffset = callerLevels.length - 1;
+    const combinedLevels = [];
+    const combinedDepthById = new Map();
+    const combinedNodes = cloneNodes(nodes);
+    const combinedEdges = new Map();
+
+    // Add caller levels (0 to callerOffset - 1)
+    for (let l = 0; l < callerOffset; l++) {
+        combinedLevels.push(callerLevels[l].slice());
+        for (const id of callerLevels[l]) {
+            combinedDepthById.set(id, l);
+            if (callerNodes.has(id)) combinedNodes.set(id, callerNodes.get(id));
+        }
+    }
+
+    // Middle level: nodeId
+    combinedLevels.push([nodeId]);
+    combinedDepthById.set(nodeId, callerOffset);
+
+    // Add callee levels (1 to calleeLevels.length - 1)
+    for (let l = 1; l < calleeLevels.length; l++) {
+        const targetLevel = callerOffset + l;
+        combinedLevels.push(calleeLevels[l].slice());
+        for (const id of calleeLevels[l]) {
+            combinedDepthById.set(id, targetLevel);
+            if (calleeNodes.has(id)) combinedNodes.set(id, calleeNodes.get(id));
+        }
+    }
+
+    // Combine edges
+    for (const [from, targets] of callerEdges.entries()) {
+        combinedEdges.set(from, Array.from(targets));
+    }
+    for (const [from, targets] of calleeEdges.entries()) {
+        if (!combinedEdges.has(from)) {
+            combinedEdges.set(from, Array.from(targets));
+        } else {
+            const existing = new Set(combinedEdges.get(from));
+            for (const t of targets) existing.add(t);
+            combinedEdges.set(from, Array.from(existing));
+        }
+    }
+
+    return {
+        levels: combinedLevels,
+        depthById: combinedDepthById,
+        nodes: combinedNodes,
+        edges: combinedEdges,
+        hasCallers,
+        hasCallees,
+        focusDepth: callerOffset
+    };
+}

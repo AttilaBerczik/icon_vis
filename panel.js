@@ -285,32 +285,45 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     const navTabs = document.createElement("div");
     navTabs.className = "tab-sub-nav";
 
+    const btnCombined = document.createElement("button");
+    btnCombined.className = "tab-sub-btn active";
+    btnCombined.textContent = "⇅ Combined";
+    btnCombined.title = "Show both Callers (above) and Callees (below)";
+
     const btnCallees = document.createElement("button");
-    btnCallees.className = "tab-sub-btn active";
+    btnCallees.className = "tab-sub-btn";
     btnCallees.textContent = "▼ Callees";
+    btnCallees.title = "Show only functions called by this node";
 
     const btnCallers = document.createElement("button");
     btnCallers.className = "tab-sub-btn";
     btnCallers.textContent = "▲ Callers";
+    btnCallers.title = "Show only functions that call this node";
 
+    navTabs.appendChild(btnCombined);
     navTabs.appendChild(btnCallees);
     navTabs.appendChild(btnCallers);
     subHeader.appendChild(titleEl);
     subHeader.appendChild(navTabs);
     containerEl.appendChild(subHeader);
 
-    // Body container holding Callees & Callers viz containers
+    // Body container holding Combined, Callees & Callers viz containers
     const bodyEl = document.createElement("div");
     bodyEl.className = "tab-sub-body";
 
+    const combinedViz = document.createElement("div");
+    combinedViz.className = "viz-container tab-viz";
+    combinedViz.style.display = "block";
+
     const calleeViz = document.createElement("div");
     calleeViz.className = "viz-container tab-viz";
-    calleeViz.style.display = "block";
+    calleeViz.style.display = "none";
 
     const callerViz = document.createElement("div");
     callerViz.className = "viz-container tab-viz";
     callerViz.style.display = "none";
 
+    bodyEl.appendChild(combinedViz);
     bodyEl.appendChild(calleeViz);
     bodyEl.appendChild(callerViz);
     containerEl.appendChild(bodyEl);
@@ -319,21 +332,40 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     const origEdges = cloneEdges(edges);
     const origNodes = cloneNodes(nodes);
 
-    // --- Build Callees Graph ---
-    const calleeSel = d3.select(calleeViz);
-    const calleeState = createGraphState();
-    const calleeEdges = cloneEdges(origEdges);
-    const calleeNodes = cloneNodes(origNodes);
+    // --- 1. Build Combined Graph (Default on start) ---
+    const combinedSel = d3.select(combinedViz);
+    const combinedState = createGraphState();
+    const combined = buildCombinedGraph(nodeId, origNodes, origEdges);
 
-    const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, calleeEdges, calleeNodes);
-
-    if (calleeLevels.length > 1) {
-        renderGraph(calleeLevels, calleeDepth, calleeNodes, calleeEdges, calleeSel, calleeState, { focusNodeId: nodeId });
+    if (combined.hasCallers || combined.hasCallees) {
+        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedSel, combinedState, { focusNodeId: nodeId });
     } else {
-        calleeSel.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
+        combinedSel.append("div").attr("class", "empty-message").text("No callers or callees found for this function.");
     }
 
-    // --- Build Callers Graph (Lazy loaded on first click) ---
+    // --- 2. Build Callees Graph (Lazy loaded on first click) ---
+    let calleeState = null;
+    let hasRenderedCallees = false;
+
+    function renderCalleesOnce() {
+        if (hasRenderedCallees) return;
+        hasRenderedCallees = true;
+
+        const calleeSel = d3.select(calleeViz);
+        calleeState = createGraphState();
+        const cEdges = cloneEdges(origEdges);
+        const cNodes = cloneNodes(origNodes);
+
+        const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, cEdges, cNodes);
+
+        if (calleeLevels.length > 1) {
+            renderGraph(calleeLevels, calleeDepth, cNodes, cEdges, calleeSel, calleeState, { focusNodeId: nodeId });
+        } else {
+            calleeSel.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
+        }
+    }
+
+    // --- 3. Build Callers Graph (Lazy loaded on first click) ---
     let callerState = null;
     let hasRenderedCallers = false;
 
@@ -356,23 +388,25 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
         }
     }
 
-    // Wire sub-tab switching
-    btnCallees.addEventListener("click", () => {
-        calleeViz.style.display = "block";
-        callerViz.style.display = "none";
-        btnCallees.classList.add("active");
-        btnCallers.classList.remove("active");
-    });
+    // Sub-tab switching
+    function showSubTab(activeType) {
+        btnCombined.classList.toggle("active", activeType === "combined");
+        btnCallees.classList.toggle("active", activeType === "callees");
+        btnCallers.classList.toggle("active", activeType === "callers");
 
-    btnCallers.addEventListener("click", () => {
-        calleeViz.style.display = "none";
-        callerViz.style.display = "block";
-        btnCallers.classList.add("active");
-        btnCallees.classList.remove("active");
-        renderCallersOnce();
-    });
+        combinedViz.style.display = activeType === "combined" ? "block" : "none";
+        calleeViz.style.display = activeType === "callees" ? "block" : "none";
+        callerViz.style.display = activeType === "callers" ? "block" : "none";
 
-    return { calleeState, getCallerState: () => callerState };
+        if (activeType === "callees") renderCalleesOnce();
+        if (activeType === "callers") renderCallersOnce();
+    }
+
+    btnCombined.addEventListener("click", () => showSubTab("combined"));
+    btnCallees.addEventListener("click", () => showSubTab("callees"));
+    btnCallers.addEventListener("click", () => showSubTab("callers"));
+
+    return { combinedState, getCalleeState: () => calleeState, getCallerState: () => callerState };
 }
 
 window.DetailPanelManager = DetailPanelManager;

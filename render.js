@@ -614,15 +614,19 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             // Vertically position the focused node
             const focusNode = nodeData.find(d => d.id === focusNodeId);
             const isBottomNode = focusNode && focusNode.depth === levels.length - 1 && levels.length > 1;
+            const isTopNode = focusNode && focusNode.depth === 0 && levels.length > 1;
 
             if (svgHeightComputed * initialScale <= viewportHeight - 40) {
                 ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
             } else if (isBottomNode) {
                 // Callers view: place focused node near bottom so callers above are visible
                 ty = (viewportHeight - 70) - focusPos.y * initialScale;
-            } else {
+            } else if (isTopNode) {
                 // Callees view: place focused node near top so callees below are visible
                 ty = 36 - focusPos.y * initialScale;
+            } else {
+                // Combined view: node is in the middle! Center focused node vertically
+                ty = (viewportHeight / 2) - focusPos.y * initialScale;
             }
         } else {
             const paddingFit = 20;

@@ -83,55 +83,82 @@ function renderSubGraphMode(nodeId, nodes, edges) {
     const origEdges = cloneEdges(edges);
     const origNodes = cloneNodes(nodes);
 
-    // --- Build Callees Graph ---
-    const calleeContainer = d3.select("#visualization");
-    const calleeState = createGraphState();
-    const calleeEdges = cloneEdges(origEdges);
-    const calleeNodes = cloneNodes(origNodes);
+    // --- 1. Build Combined Graph (Default on start) ---
+    const combinedContainer = d3.select("#visualization");
+    const combinedState = createGraphState();
+    const combined = buildCombinedGraph(nodeId, origNodes, origEdges);
 
-    const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, calleeEdges, calleeNodes);
-
-    if (calleeLevels.length > 1) {
-        renderGraph(calleeLevels, calleeDepth, calleeNodes, calleeEdges, calleeContainer, calleeState, { focusNodeId: nodeId });
+    if (combined.hasCallers || combined.hasCallees) {
+        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedContainer, combinedState, { focusNodeId: nodeId });
     } else {
-        calleeContainer.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
+        combinedContainer.append("div").attr("class", "empty-message").text("No callers or callees found for this function.");
     }
 
-    // --- Build Callers Graph ---
+    // --- 2. Build Callees Graph (Lazy) ---
+    const calleeContainer = d3.select("#visualization-callees");
+    let calleeState = null;
+    let hasRenderedCallees = false;
+
+    function renderCalleesOnce() {
+        if (hasRenderedCallees) return;
+        hasRenderedCallees = true;
+        calleeState = createGraphState();
+        const calleeEdges = cloneEdges(origEdges);
+        const calleeNodes = cloneNodes(origNodes);
+        const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, calleeEdges, calleeNodes);
+
+        if (calleeLevels.length > 1) {
+            renderGraph(calleeLevels, calleeDepth, calleeNodes, calleeEdges, calleeContainer, calleeState, { focusNodeId: nodeId });
+        } else {
+            calleeContainer.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
+        }
+    }
+
+    // --- 3. Build Callers Graph (Lazy) ---
     const callerContainer = d3.select("#visualization-callers");
-    const callerState = createGraphState();
-    const reverseEdges = buildReverseEdgeMap(origEdges);
-    const callerNodes = cloneNodes(origNodes);
+    let callerState = null;
+    let hasRenderedCallers = false;
 
-    const { levels: rawCallerLevels, depthById: rawCallerDepth } = buildLevels(nodeId, reverseEdges, callerNodes);
+    function renderCallersOnce() {
+        if (hasRenderedCallers) return;
+        hasRenderedCallers = true;
+        callerState = createGraphState();
+        const reverseEdges = buildReverseEdgeMap(origEdges);
+        const callerNodes = cloneNodes(origNodes);
+        const { levels: rawCallerLevels, depthById: rawCallerDepth } = buildLevels(nodeId, reverseEdges, callerNodes);
 
-    if (rawCallerLevels.length > 1) {
-        // Flip the graph so callers appear above the focused node
-        const flipped = flipGraph(rawCallerLevels, rawCallerDepth, reverseEdges);
-        renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerContainer, callerState, { focusNodeId: nodeId });
-    } else {
-        callerContainer.append("div").attr("class", "empty-message").text("No callers found for this function.");
+        if (rawCallerLevels.length > 1) {
+            const flipped = flipGraph(rawCallerLevels, rawCallerDepth, reverseEdges);
+            renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerContainer, callerState, { focusNodeId: nodeId });
+        } else {
+            callerContainer.append("div").attr("class", "empty-message").text("No callers found for this function.");
+        }
     }
 
     // --- Tab Switching ---
+    const tabCombined = document.getElementById("tab-combined");
     const tabCallees = document.getElementById("tab-callees");
     const tabCallers = document.getElementById("tab-callers");
-    const visCallees = document.getElementById("visualization");
+    const visCombined = document.getElementById("visualization");
+    const visCallees = document.getElementById("visualization-callees");
     const visCallers = document.getElementById("visualization-callers");
 
-    tabCallees.addEventListener("click", () => {
-        visCallees.style.display = "block";
-        visCallers.style.display = "none";
-        tabCallees.classList.add("active");
-        tabCallers.classList.remove("active");
-    });
+    function switchMode(mode) {
+        tabCombined?.classList.toggle("active", mode === "combined");
+        tabCallees?.classList.toggle("active", mode === "callees");
+        tabCallers?.classList.toggle("active", mode === "callers");
 
-    tabCallers.addEventListener("click", () => {
-        visCallees.style.display = "none";
-        visCallers.style.display = "block";
-        tabCallers.classList.add("active");
-        tabCallees.classList.remove("active");
-    });
+        if (visCombined) visCombined.style.display = mode === "combined" ? "block" : "none";
+        if (visCallees) visCallees.style.display = mode === "callees" ? "block" : "none";
+        if (visCallers) visCallers.style.display = mode === "callers" ? "block" : "none";
+
+        if (mode === "callees") renderCalleesOnce();
+        if (mode === "callers") renderCallersOnce();
+    }
+
+    if (tabCombined) tabCombined.addEventListener("click", () => switchMode("combined"));
+    if (tabCallees) tabCallees.addEventListener("click", () => switchMode("callees"));
+    if (tabCallers) tabCallers.addEventListener("click", () => switchMode("callers"));
 }
 
 // --- Toggle Controls ---

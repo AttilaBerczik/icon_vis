@@ -448,7 +448,8 @@
                     <a href="index.html" id="back-link">← Main View</a>
                     <span id="subgraph-node-name"></span>
                     <div id="subgraph-tabs">
-                        <button id="tab-callees" class="tab-btn active">▼ Callees</button>
+                        <button id="tab-combined" class="tab-btn active">⇅ Combined</button>
+                        <button id="tab-callees" class="tab-btn">▼ Callees</button>
                         <button id="tab-callers" class="tab-btn">▲ Callers</button>
                     </div>
                 </div>
@@ -462,8 +463,11 @@
                 </div>
             </div>
 
-            <!-- Callees / main visualization -->
+            <!-- Combined / main visualization -->
             <div id="visualization" class="viz-container"></div>
+
+            <!-- Callees visualization (only used in sub-graph mode) -->
+            <div id="visualization-callees" class="viz-container" style="display:none;"></div>
 
             <!-- Callers visualization (only used in sub-graph mode) -->
             <div id="visualization-callers" class="viz-container" style="display:none;"></div>
