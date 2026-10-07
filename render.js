@@ -778,17 +778,38 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         })
         .text(d => d.line);
 
-    // --- Interaction Attachments & Zoom ---
-    const zoom = d3.zoom()
-        .scaleExtent([0.05, 5])
-        .on("zoom", (event) => {
-            state.currentZoomTransform = event.transform;
-            mainGroup.attr("transform", event.transform);
-        });
+    // --- Layout Bounding Box for Viewport Visibility Tracking ---
+    let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+    folderBoxData.forEach(b => {
+        gMinX = Math.min(gMinX, b.x);
+        gMinY = Math.min(gMinY, b.y);
+        gMaxX = Math.max(gMaxX, b.x + b.width);
+        gMaxY = Math.max(gMaxY, b.y + b.height);
+    });
+    fileBoxData.forEach(b => {
+        gMinX = Math.min(gMinX, b.x);
+        gMinY = Math.min(gMinY, b.y);
+        gMaxX = Math.max(gMaxX, b.x + b.width);
+        gMaxY = Math.max(gMaxY, b.y + b.height);
+    });
+    nodeData.forEach(d => {
+        const pos = positions.get(d.id);
+        if (!pos) return;
+        const w = d.width || 0;
+        const h = d.height || 0;
+        gMinX = Math.min(gMinX, pos.x - w / 2);
+        gMinY = Math.min(gMinY, pos.y - h / 2);
+        gMaxX = Math.max(gMaxX, pos.x + w / 2);
+        gMaxY = Math.max(gMaxY, pos.y + h / 2);
+    });
+    if (gMinX === Infinity) {
+        gMinX = 0; gMinY = 0; gMaxX = svgWidth; gMaxY = svgHeightComputed;
+    }
 
-    svg.call(zoom);
+    function computeFitTransform(customVpWidth, customVpHeight) {
+        const vpW = customVpWidth || ((containerNode && containerNode.clientWidth > 0) ? containerNode.clientWidth : fallbackWidth);
+        const vpH = customVpHeight || ((containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : (document.getElementById("graph-split-container")?.clientHeight || window.innerHeight - 48));
 
-    if (state.isInitialRender || state.needsFitToScreen) {
         let initialScale = 1;
         let tx = 0;
         let ty = 0;
@@ -796,8 +817,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         if (focusNodeId && positions.has(focusNodeId)) {
             const focusPos = positions.get(focusNodeId);
             const paddingFit = 16;
-            const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
-            const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+            const scaleX = (vpW - paddingFit * 2) / svgWidth;
+            const scaleY = (vpH - paddingFit * 2) / svgHeightComputed;
 
             // Maintain a comfortable, legible zoom for the focused sub-graph
             initialScale = Math.min(1, Math.max(0.65, Math.min(scaleX, scaleY)));
@@ -806,35 +827,156 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             }
 
             // Always center the focused node horizontally in the exact middle of the viewport
-            tx = (viewportWidth / 2) - focusPos.x * initialScale;
+            tx = (vpW / 2) - focusPos.x * initialScale;
 
             // Vertically position the focused node
             const focusNode = nodeData.find(d => d.id === focusNodeId);
             const isBottomNode = focusNode && focusNode.depth === levels.length - 1 && levels.length > 1;
             const isTopNode = focusNode && focusNode.depth === 0 && levels.length > 1;
 
-            if (svgHeightComputed * initialScale <= viewportHeight - 40) {
-                ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
+            if (svgHeightComputed * initialScale <= vpH - 40) {
+                ty = (vpH - svgHeightComputed * initialScale) / 2;
             } else if (isBottomNode) {
                 // Callers view: place focused node near bottom so callers above are visible
-                ty = (viewportHeight - 70) - focusPos.y * initialScale;
+                ty = (vpH - 70) - focusPos.y * initialScale;
             } else if (isTopNode) {
                 // Callees view: place focused node near top so callees below are visible
                 ty = 36 - focusPos.y * initialScale;
             } else {
                 // Combined view: node is in the middle! Center focused node vertically
-                ty = (viewportHeight / 2) - focusPos.y * initialScale;
+                ty = (vpH / 2) - focusPos.y * initialScale;
             }
         } else {
             const paddingFit = 20;
-            const scaleX = (viewportWidth - paddingFit * 2) / svgWidth;
-            const scaleY = (viewportHeight - paddingFit * 2) / svgHeightComputed;
+            const scaleX = (vpW - paddingFit * 2) / svgWidth;
+            const scaleY = (vpH - paddingFit * 2) / svgHeightComputed;
             initialScale = Math.min(scaleX, scaleY, 1);
-            tx = (viewportWidth - svgWidth * initialScale) / 2;
-            ty = (viewportHeight - svgHeightComputed * initialScale) / 2;
+            tx = (vpW - svgWidth * initialScale) / 2;
+            ty = (vpH - svgHeightComputed * initialScale) / 2;
         }
 
-        state.currentZoomTransform = d3.zoomIdentity.translate(tx, ty).scale(initialScale);
+        return d3.zoomIdentity.translate(tx, ty).scale(initialScale);
+    }
+
+    // --- Floating "Back to Graph" Navigation Button ---
+    const backBtn = container.append("button")
+        .attr("type", "button")
+        .attr("class", "btn-back-to-graph")
+        .attr("title", "Navigate back to view the graph")
+        .attr("aria-label", "Navigate back to view the graph");
+
+    const backBtnArrow = backBtn.append("span")
+        .attr("class", "back-graph-arrow")
+        .text("⌖");
+
+    backBtn.append("span")
+        .attr("class", "back-graph-text")
+        .text("Back to Graph");
+
+    function updateNavButton() {
+        const vpW = (containerNode && containerNode.clientWidth > 0) ? containerNode.clientWidth : fallbackWidth;
+        const vpH = (containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : (document.getElementById("graph-split-container")?.clientHeight || window.innerHeight - 48);
+        const transform = state.currentZoomTransform || d3.zoomIdentity;
+
+        const screenLeft = transform.x + gMinX * transform.k;
+        const screenTop = transform.y + gMinY * transform.k;
+        const screenRight = transform.x + gMaxX * transform.k;
+        const screenBottom = transform.y + gMaxY * transform.k;
+
+        // Check if any part of the graph bounding box is visible in the viewport
+        const isVisible = !(
+            screenRight <= 10 ||
+            screenLeft >= vpW - 10 ||
+            screenBottom <= 10 ||
+            screenTop >= vpH - 10
+        );
+
+        if (isVisible) {
+            backBtn.classed("visible", false);
+        } else {
+            // Calculate direction from center of viewport to center of graph
+            const graphCenterX = transform.x + ((gMinX + gMaxX) / 2) * transform.k;
+            const graphCenterY = transform.y + ((gMinY + gMaxY) / 2) * transform.k;
+            const vpCenterX = vpW / 2;
+            const vpCenterY = vpH / 2;
+            const dx = graphCenterX - vpCenterX;
+            const dy = graphCenterY - vpCenterY;
+            const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+            let arrow = "⌖";
+            if (angle >= -22.5 && angle < 22.5) {
+                arrow = "→";
+            } else if (angle >= 22.5 && angle < 67.5) {
+                arrow = "↘";
+            } else if (angle >= 67.5 && angle < 112.5) {
+                arrow = "↓";
+            } else if (angle >= 112.5 && angle < 157.5) {
+                arrow = "↙";
+            } else if (angle >= 157.5 || angle < -157.5) {
+                arrow = "←";
+            } else if (angle >= -157.5 && angle < -112.5) {
+                arrow = "↖";
+            } else if (angle >= -112.5 && angle < -67.5) {
+                arrow = "↑";
+            } else if (angle >= -67.5 && angle < -22.5) {
+                arrow = "↗";
+            }
+
+            backBtnArrow.text(arrow);
+            backBtn.classed("visible", true);
+        }
+    }
+
+    backBtn.on("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        const targetTransform = computeFitTransform();
+        state.currentZoomTransform = targetTransform;
+        svg.transition()
+            .duration(600)
+            .ease(d3.easeCubicOut)
+            .call(zoom.transform, targetTransform)
+            .on("end", () => {
+                updateNavButton();
+            });
+    });
+
+    if (window.ResizeObserver && containerNode) {
+        if (containerNode._navResizeObserver) {
+            containerNode._navResizeObserver.disconnect();
+        }
+        const ro = new ResizeObserver(() => {
+            updateNavButton();
+        });
+        ro.observe(containerNode);
+        containerNode._navResizeObserver = ro;
+    }
+
+    container.node().navigateBackToGraph = function() {
+        const targetTransform = computeFitTransform();
+        state.currentZoomTransform = targetTransform;
+        svg.transition()
+            .duration(600)
+            .ease(d3.easeCubicOut)
+            .call(zoom.transform, targetTransform)
+            .on("end", () => {
+                updateNavButton();
+            });
+    };
+
+    // --- Interaction Attachments & Zoom ---
+    const zoom = d3.zoom()
+        .scaleExtent([0.05, 5])
+        .on("zoom", (event) => {
+            state.currentZoomTransform = event.transform;
+            mainGroup.attr("transform", event.transform);
+            updateNavButton();
+        });
+
+    svg.call(zoom);
+
+    if (state.isInitialRender || state.needsFitToScreen) {
+        state.currentZoomTransform = computeFitTransform(viewportWidth, viewportHeight);
         state.isInitialRender = false;
         state.needsFitToScreen = false;
     }
@@ -847,6 +989,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // Apply the saved or actively compensated zoom seamlessly
     svg.call(zoom.transform, state.currentZoomTransform);
     mainGroup.attr("transform", state.currentZoomTransform);
+    updateNavButton();
 
     // If focusing on a search node, smoothly pan to it
     if (options && options.focusSearchNodeId && positions.has(options.focusSearchNodeId)) {
