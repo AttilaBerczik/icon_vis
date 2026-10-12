@@ -55,7 +55,24 @@ function renderMainMode(nodes, edges) {
     const state = createGraphState();
 
     const { levels, depthById } = buildLevels(rootId, edges, nodes);
-    renderGraph(levels, depthById, nodes, edges, container, state, { collapseAllOnInit: true });
+    renderGraph(levels, depthById, nodes, edges, container, state, {
+        collapseAllOnInit: true,
+        onNodeHover: (hId) => {
+            if (window.detailPanelManager && typeof window.detailPanelManager.highlightNodeHover === "function") {
+                window.detailPanelManager.highlightNodeHover(hId);
+            }
+        },
+        onNodeMouseOut: () => {
+            if (window.detailPanelManager && typeof window.detailPanelManager.clearNodeHover === "function") {
+                window.detailPanelManager.clearNodeHover();
+            }
+        },
+        onNodeClick: (cId) => {
+            if (window.detailPanelManager && typeof window.detailPanelManager.selectNode === "function") {
+                window.detailPanelManager.selectNode(cId);
+            }
+        }
+    });
 
     // Seed any remaining unreached folders/files in nodes to ensure they also have locked-in consistent colors
     for (const [id, rawLabel] of nodes.entries()) {

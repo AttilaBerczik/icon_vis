@@ -456,9 +456,9 @@
         }
         .detail-tab.active {
             background: #0f172a;
-            color: #38bdf8;
-            border-color: #38bdf8;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            color: #34d399;
+            border-color: #10b981;
+            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.35);
         }
 
         .detail-tab-title {
@@ -504,12 +504,20 @@
         }
 
         @keyframes tabPulse {
-            0% { transform: scale(1); background-color: #38bdf8; color: #fff; }
-            50% { transform: scale(1.08); background-color: #0284c7; color: #fff; }
+            0% { transform: scale(1); background-color: #10b981; color: #fff; }
+            50% { transform: scale(1.08); background-color: #059669; color: #fff; }
             100% { transform: scale(1); }
         }
         .tab-highlight-pulse {
             animation: tabPulse 0.5s ease-out;
+        }
+
+        @keyframes emeraldRingPulse {
+            0%, 100% { stroke-opacity: 0.9; stroke-width: 2px; }
+            50% { stroke-opacity: 0.45; stroke-width: 2.8px; }
+        }
+        .active-tab-ring {
+            animation: emeraldRingPulse 2s ease-in-out infinite;
         }
 
         .detail-content-area {
@@ -543,10 +551,23 @@
         .tab-sub-title {
             font-size: 13px;
             font-weight: 700;
-            color: #1e293b;
+            color: #065f46;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        .tab-sub-title::before {
+            content: "";
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #059669;
+            box-shadow: 0 0 6px rgba(5, 150, 105, 0.6);
+            flex-shrink: 0;
         }
 
         .tab-sub-nav {

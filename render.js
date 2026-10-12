@@ -51,6 +51,13 @@ function createGraphState() {
 
 function renderGraph(levels, depthById, nodes, edges, containerSel, state, options) {
     const focusNodeId = (options && options.focusNodeId) || null;
+    if (focusNodeId) {
+        state.focusNodeId = focusNodeId;
+    } else if (options && options.activeTabNodeId !== undefined) {
+        state.activeTabNodeId = options.activeTabNodeId;
+    } else if (state.activeTabNodeId === undefined && window.detailPanelManager && typeof window.detailPanelManager.getActiveNodeId === "function") {
+        state.activeTabNodeId = window.detailPanelManager.getActiveNodeId();
+    }
 
     // Save state so we can re-render cleanly on toggles
     state.currentGraphData = { levels, depthById, nodes, edges };
@@ -691,7 +698,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     const svg = container.append("svg").attr("width", "100%").attr("height", "100%");
 
-    // SVG Defs for search highlights
+    // SVG Defs for highlights
     const svgDefs = svg.append("defs");
     const filterAmber = svgDefs.append("filter")
         .attr("id", "glow-amber")
@@ -712,6 +719,16 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("stdDeviation", "6")
         .attr("flood-color", "#ea580c")
         .attr("flood-opacity", "0.9");
+
+    const filterEmerald = svgDefs.append("filter")
+        .attr("id", "glow-emerald")
+        .attr("x", "-30%").attr("y", "-30%")
+        .attr("width", "160%").attr("height", "160%");
+    filterEmerald.append("feDropShadow")
+        .attr("dx", "0").attr("dy", "2")
+        .attr("stdDeviation", "5")
+        .attr("flood-color", "#059669")
+        .attr("flood-opacity", "0.65");
 
     const mainGroup = svg.append("g").attr("class", "main-zoom-group");
 
@@ -938,9 +955,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         !d.isDummy && !collapsedFolders.has(d.folder) && !collapsedFiles.has(d.fileKey)
     );
 
-    const isNodeHighlighted = (d) => {
+    const isTabNode = (d) => {
         if (focusNodeId) return d.id === focusNodeId;
-        return d.depth === 0;
+        return !!(state.activeTabNodeId && d.id === state.activeTabNodeId);
+    };
+
+    const isRootNode = (d) => {
+        if (focusNodeId) return false;
+        return d.depth === 0 && (!state.activeTabNodeId || d.id !== state.activeTabNodeId);
     };
 
     const searchState = state.searchState;
@@ -962,7 +984,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "file") return "#8b5cf6"; // File match: vivid violet
             if (mt === "folder") return "#06b6d4"; // Folder match: electric cyan
         }
-        if (isNodeHighlighted(d)) return "#2563eb";
+        if (isTabNode(d)) return "#059669"; // Active tab's selected node: unique emerald green
+        if (isRootNode(d)) return "#2563eb";
         return "#e2e8f0";
     };
 
@@ -974,6 +997,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "file") return "#5b21b6";
             if (mt === "folder") return "#0e7490";
         }
+        if (isTabNode(d)) return "#047857"; // Deep emerald green border
         return "#94a3b8";
     };
 
@@ -983,13 +1007,16 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (d.id === activeMatchId) return 3.5;
             return 2.5;
         }
+        if (isTabNode(d)) return 2.5;
         return 1;
     };
 
     const getNodeFilter = (d) => {
-        if (!isSearchActive) return null;
-        if (d.id === activeMatchId) return "url(#glow-active)";
-        if (getNodeMatchType(d)) return "url(#glow-amber)";
+        if (isSearchActive) {
+            if (d.id === activeMatchId) return "url(#glow-active)";
+            if (getNodeMatchType(d)) return "url(#glow-amber)";
+        }
+        if (isTabNode(d)) return "url(#glow-emerald)";
         return null;
     };
 
@@ -1000,7 +1027,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "function") return "#0f172a"; // Deep bold black text on vivid amber gold
             if (mt === "file" || mt === "folder") return "#ffffff";
         }
-        if (isNodeHighlighted(d)) return "#f8fafc";
+        if (isTabNode(d)) return "#ffffff";
+        if (isRootNode(d)) return "#f8fafc";
         return "#1f2937";
     };
 
@@ -1013,6 +1041,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                 cls += ` search-match search-match-${mt}`;
                 if (d.id === activeMatchId) cls += " search-match-active";
             }
+            if (isTabNode(d)) cls += " node-active-tab";
             return cls;
         })
         .attr("transform", (d) => {
@@ -1028,6 +1057,19 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("stroke", d => getNodeRectStroke(d))
         .attr("stroke-width", d => getNodeRectStrokeWidth(d))
         .attr("filter", d => getNodeFilter(d));
+
+    // Outer ring for active tab node
+    nodesSelection.filter(d => isTabNode(d))
+        .append("rect")
+        .attr("class", "active-tab-ring")
+        .attr("x", -3).attr("y", -3)
+        .attr("width", d => d.width + 6).attr("height", d => d.height + 6)
+        .attr("rx", 8)
+        .attr("fill", "none")
+        .attr("stroke", "#10b981")
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "4,2")
+        .style("pointer-events", "none");
 
     // Outer pulsing ring for active search match
     nodesSelection.filter(d => d.id === activeMatchId)
@@ -1055,6 +1097,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             isFuncLine: idx === d.lines.length - 1,
             matchType: getNodeMatchType(d),
             isActiveMatch: d.id === activeMatchId,
+            isTabNode: isTabNode(d),
             width: d.width
         })))
         .enter().append("tspan")
@@ -1063,6 +1106,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (d.isActiveMatch) return "800";
             if (d.matchType === "function" && d.isFuncLine) return "800";
             if (d.matchType) return "700";
+            if (d.isTabNode) return (d.isFuncLine ? "800" : "700");
             return "normal";
         })
         .text(d => d.line);
@@ -1306,8 +1350,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         getNodeRectStroke,
         getNodeRectStrokeWidth,
         getNodeFilter,
-        getNodeTextFill
-    });
+        getNodeTextFill,
+        isTabNode
+    }, options, container);
 }
 
 function renderError(message, containerSel) {
@@ -1402,7 +1447,7 @@ function getAllConnected(startId, edges, reverseEdges) {
     return connected;
 }
 
-function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, state, styleHelpers) {
+function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, state, styleHelpers, options, container) {
     const reverseEdgesMap = buildReverseEdges(edgesMap);
     let activeClickedNodeId = (state && state.activeClickedNodeId) || null;
 
@@ -1411,7 +1456,8 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         getNodeRectStroke = () => "#94a3b8",
         getNodeRectStrokeWidth = () => 1,
         getNodeFilter = () => null,
-        getNodeTextFill = (d) => (d.depth === 0 ? "#f8fafc" : "#1f2937")
+        getNodeTextFill = (d) => (d.depth === 0 ? "#f8fafc" : "#1f2937"),
+        isTabNode = () => false
     } = (styleHelpers || {});
 
     const isSearchActive = () => !!(state && state.searchState && state.searchState.matchingNodeIds && state.searchState.matchingNodeIds.size > 0);
@@ -1420,8 +1466,10 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         if (!activeSet) {
             nodesSelection.each(function(d) {
                 const g = d3.select(this);
+                const tabActive = isTabNode ? isTabNode(d) : false;
                 g.classed("node-primary-highlight", false);
                 g.classed("node-connected-highlight", false);
+                g.classed("node-active-tab", tabActive);
 
                 if (isSearchActive()) {
                     g.style("opacity", state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
@@ -1440,8 +1488,23 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
                         if (t && t.isActiveMatch) return "800";
                         if (t && t.matchType === "function" && t.isFuncLine) return "800";
                         if (t && t.matchType) return "700";
+                        if (tabActive) return (t && t.isFuncLine ? "800" : "700");
                         return "normal";
                     });
+
+                g.selectAll(".active-tab-ring").remove();
+                if (tabActive) {
+                    g.append("rect")
+                        .attr("class", "active-tab-ring")
+                        .attr("x", -3).attr("y", -3)
+                        .attr("width", d.width + 6).attr("height", d.height + 6)
+                        .attr("rx", 8)
+                        .attr("fill", "none")
+                        .attr("stroke", "#10b981")
+                        .attr("stroke-width", 2)
+                        .attr("stroke-dasharray", "4,2")
+                        .style("pointer-events", "none");
+                }
             });
 
             if (isSearchActive()) {
@@ -1460,18 +1523,20 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             const g = d3.select(this);
             const isPrimary = !!(primaryId && d.id === primaryId);
             const isConnected = activeSet.has(d.id);
+            const tabActive = isTabNode ? isTabNode(d) : false;
 
             g.classed("node-primary-highlight", isPrimary);
             g.classed("node-connected-highlight", isConnected && !isPrimary);
+            g.classed("node-active-tab", tabActive);
 
             if (isPrimary) {
                 // Primary node (Hovered or Clicked): MUCH stronger contrast
                 g.style("opacity", 1);
                 g.select("rect.node-rect")
                     .attr("fill", "#0f172a") // Deep slate-900 / dark contrast
-                    .attr("stroke", "#38bdf8") // Vivid luminous sky-blue border
+                    .attr("stroke", tabActive ? "#34d399" : "#38bdf8") // Vivid luminous emerald or sky-blue border
                     .attr("stroke-width", 3)
-                    .style("filter", "drop-shadow(0 4px 8px rgba(15, 23, 42, 0.45))");
+                    .style("filter", tabActive ? "drop-shadow(0 4px 10px rgba(5, 150, 105, 0.55))" : "drop-shadow(0 4px 8px rgba(15, 23, 42, 0.45))");
                 g.select("text.node-text")
                     .attr("fill", "#ffffff"); // Pure white
                 g.selectAll("tspan")
@@ -1480,10 +1545,10 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
                 // Connected nodes: SOMEWHAT stronger contrast
                 g.style("opacity", 1);
                 g.select("rect.node-rect")
-                    .attr("fill", "#2563eb") // Rich Royal Blue 600
-                    .attr("stroke", "#1d4ed8") // Deep blue 700 border
-                    .attr("stroke-width", 2)
-                    .style("filter", "none");
+                    .attr("fill", tabActive ? "#059669" : "#2563eb") // Keep emerald if tab node, rich royal blue otherwise
+                    .attr("stroke", tabActive ? "#34d399" : "#1d4ed8") // Emerald border or deep blue border
+                    .attr("stroke-width", tabActive ? 2.5 : 2)
+                    .style("filter", tabActive ? "url(#glow-emerald)" : "none");
                 g.select("text.node-text")
                     .attr("fill", "#ffffff"); // Pure white
                 g.selectAll("tspan")
@@ -1499,7 +1564,7 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
                     .attr("fill", getNodeRectFill(d))
                     .attr("stroke", getNodeRectStroke(d))
                     .attr("stroke-width", getNodeRectStrokeWidth(d))
-                    .style("filter", "none");
+                    .style("filter", getNodeFilter(d) || "none");
                 g.select("text.node-text")
                     .attr("fill", getNodeTextFill(d));
                 g.selectAll("tspan")
@@ -1507,8 +1572,23 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
                         if (t && t.isActiveMatch) return "800";
                         if (t && t.matchType === "function" && t.isFuncLine) return "800";
                         if (t && t.matchType) return "700";
+                        if (tabActive) return (t && t.isFuncLine ? "800" : "700");
                         return "normal";
                     });
+            }
+
+            g.selectAll(".active-tab-ring").remove();
+            if (tabActive) {
+                g.append("rect")
+                    .attr("class", "active-tab-ring")
+                    .attr("x", -3).attr("y", -3)
+                    .attr("width", d.width + 6).attr("height", d.height + 6)
+                    .attr("rx", 8)
+                    .attr("fill", "none")
+                    .attr("stroke", "#10b981")
+                    .attr("stroke-width", 2)
+                    .attr("stroke-dasharray", "4,2")
+                    .style("pointer-events", "none");
             }
         });
 
@@ -1548,6 +1628,7 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         if (primaryId) {
             nodesSelection.filter(d => d.id === primaryId).raise();
         }
+        nodesSelection.filter(d => isTabNode && isTabNode(d) && d.id !== primaryId).raise();
     }
 
     // Restore active clicked node or search state
@@ -1566,21 +1647,33 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             if (activeClickedNodeId) return;
             const immediateNeighbors = getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
             updateHighlightState(immediateNeighbors, d.id);
+            if (options && typeof options.onNodeHover === "function") {
+                options.onNodeHover(d.id);
+            }
         })
         .on("mouseout", function() {
             if (activeClickedNodeId) return;
             updateHighlightState(null, null);
+            if (options && typeof options.onNodeMouseOut === "function") {
+                options.onNodeMouseOut();
+            }
         })
         .on("click", function(event, d) {
             if (activeClickedNodeId === d.id) {
                 activeClickedNodeId = null;
                 if (state) state.activeClickedNodeId = null;
                 updateHighlightState(null, null);
+                if (options && typeof options.onNodeClick === "function") {
+                    options.onNodeClick(null);
+                }
             } else {
                 activeClickedNodeId = d.id;
                 if (state) state.activeClickedNodeId = d.id;
                 const allConnected = getAllConnected(d.id, edgesMap, reverseEdgesMap);
                 updateHighlightState(allConnected, d.id);
+                if (options && typeof options.onNodeClick === "function") {
+                    options.onNodeClick(d.id);
+                }
             }
             event.stopPropagation();
         })
@@ -1635,11 +1728,116 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             activeClickedNodeId = null;
             if (state) state.activeClickedNodeId = null;
             updateHighlightState(null, null);
+            if (options && typeof options.onNodeClick === "function") {
+                options.onNodeClick(null);
+            }
         }
         // Hide context menu on background click
         const ctxMenu = document.getElementById("context-menu");
         if (ctxMenu) ctxMenu.style.display = "none";
     });
+
+    if (container && container.node()) {
+        const cNode = container.node();
+        cNode.highlightNodeHover = function(nodeId) {
+            if (activeClickedNodeId) return;
+            if (!nodeId) {
+                updateHighlightState(null, null);
+                return;
+            }
+            if (nodesSelection.data().some(d => d.id === nodeId)) {
+                const immediateNeighbors = getImmediateNeighbors(nodeId, edgesMap, reverseEdgesMap);
+                updateHighlightState(immediateNeighbors, nodeId);
+            }
+        };
+
+        cNode.clearNodeHover = function() {
+            if (activeClickedNodeId) {
+                const allConnected = getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
+                updateHighlightState(allConnected, activeClickedNodeId);
+            } else {
+                updateHighlightState(null, null);
+            }
+        };
+
+        cNode.selectNode = function(nodeId) {
+            if (!nodeId || activeClickedNodeId === nodeId) {
+                activeClickedNodeId = null;
+                if (state) state.activeClickedNodeId = null;
+                updateHighlightState(null, null);
+                return;
+            }
+
+            // Uncollapse if collapsed
+            let uncollapsed = false;
+            if (state && state.currentGraphData && state.currentGraphData.nodes) {
+                const rawLabel = state.currentGraphData.nodes.get(nodeId);
+                if (rawLabel) {
+                    const info = parseNodeLabel(rawLabel);
+                    const fileKey = makeFileKey(info.folder, info.file);
+                    if (info.folder && state.collapsedFolders.has(info.folder)) {
+                        state.collapsedFolders.delete(info.folder);
+                        uncollapsed = true;
+                    }
+                    if (fileKey && state.collapsedFiles.has(fileKey)) {
+                        state.collapsedFiles.delete(fileKey);
+                        uncollapsed = true;
+                    }
+                }
+            }
+
+            if (uncollapsed) {
+                state.activeClickedNodeId = nodeId;
+                renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, {
+                    ...options,
+                    collapseAllOnInit: false
+                });
+                return;
+            }
+
+            activeClickedNodeId = nodeId;
+            if (state) state.activeClickedNodeId = nodeId;
+            const allConnected = getAllConnected(nodeId, edgesMap, reverseEdgesMap);
+            updateHighlightState(allConnected, nodeId);
+        };
+
+        cNode.setActiveTabNode = function(nodeId) {
+            if (state) state.activeTabNodeId = nodeId;
+
+            // Uncollapse folder/file on left if nodeId is collapsed
+            let uncollapsed = false;
+            if (nodeId && state && state.currentGraphData && state.currentGraphData.nodes) {
+                const rawLabel = state.currentGraphData.nodes.get(nodeId);
+                if (rawLabel) {
+                    const info = parseNodeLabel(rawLabel);
+                    const fileKey = makeFileKey(info.folder, info.file);
+                    if (info.folder && state.collapsedFolders.has(info.folder)) {
+                        state.collapsedFolders.delete(info.folder);
+                        uncollapsed = true;
+                    }
+                    if (fileKey && state.collapsedFiles.has(fileKey)) {
+                        state.collapsedFiles.delete(fileKey);
+                        uncollapsed = true;
+                    }
+                }
+            }
+
+            if (uncollapsed) {
+                renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, {
+                    ...options,
+                    collapseAllOnInit: false
+                });
+                return;
+            }
+
+            if (activeClickedNodeId) {
+                const allConnected = getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
+                updateHighlightState(allConnected, activeClickedNodeId);
+            } else {
+                updateHighlightState(null, null);
+            }
+        };
+    }
 }
 
 // --- Search Engine Implementation ---

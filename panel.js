@@ -180,11 +180,24 @@ class DetailPanelManager {
 
         this.tabs.push(tabObj);
         this.activeTabId = tabId;
+        this.notifyActiveNodeChanged(nodeId);
 
         // Scroll tab bar to make new tab visible
         tabBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
 
         return tabId;
+    }
+
+    getActiveNodeId() {
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        return activeTab ? activeTab.nodeId : null;
+    }
+
+    notifyActiveNodeChanged(nodeId) {
+        const leftViz = document.getElementById("visualization");
+        if (leftViz && typeof leftViz.setActiveTabNode === "function") {
+            leftViz.setActiveTabNode(nodeId);
+        }
     }
 
     switchTab(tabId) {
@@ -203,6 +216,8 @@ class DetailPanelManager {
                 t.contentContainer.style.display = "none";
             }
         });
+
+        this.notifyActiveNodeChanged(tab.nodeId);
     }
 
     closeTab(tabId) {
@@ -243,6 +258,7 @@ class DetailPanelManager {
         });
         this.tabs = [];
         this.activeTabId = null;
+        this.notifyActiveNodeChanged(null);
 
         if (this.detailPanel) {
             this.detailPanel.style.display = "none";
@@ -250,6 +266,42 @@ class DetailPanelManager {
         if (this.resizer) {
             this.resizer.style.display = "none";
         }
+    }
+
+    highlightNodeHover(nodeId) {
+        if (!this.contentArea) return;
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        if (!activeTab || !activeTab.contentContainer) return;
+        const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (node.style.display !== "none" && typeof node.highlightNodeHover === "function") {
+                node.highlightNodeHover(nodeId);
+            }
+        });
+    }
+
+    clearNodeHover() {
+        if (!this.contentArea) return;
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        if (!activeTab || !activeTab.contentContainer) return;
+        const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (node.style.display !== "none" && typeof node.clearNodeHover === "function") {
+                node.clearNodeHover();
+            }
+        });
+    }
+
+    selectNode(nodeId) {
+        if (!this.contentArea) return;
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        if (!activeTab || !activeTab.contentContainer) return;
+        const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (node.style.display !== "none" && typeof node.selectNode === "function") {
+                node.selectNode(nodeId);
+            }
+        });
     }
 
     updateEdgeRouting() {
@@ -356,13 +408,36 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     const origEdges = cloneEdges(edges);
     const origNodes = cloneNodes(nodes);
 
+    const subGraphOptions = {
+        focusNodeId: nodeId,
+        isSubGraph: true,
+        onNodeHover: (hId) => {
+            const leftViz = document.getElementById("visualization");
+            if (leftViz && typeof leftViz.highlightNodeHover === "function") {
+                leftViz.highlightNodeHover(hId);
+            }
+        },
+        onNodeMouseOut: () => {
+            const leftViz = document.getElementById("visualization");
+            if (leftViz && typeof leftViz.clearNodeHover === "function") {
+                leftViz.clearNodeHover();
+            }
+        },
+        onNodeClick: (cId) => {
+            const leftViz = document.getElementById("visualization");
+            if (leftViz && typeof leftViz.selectNode === "function") {
+                leftViz.selectNode(cId);
+            }
+        }
+    };
+
     // --- 1. Build Combined Graph (Default on start) ---
     const combinedSel = d3.select(combinedViz);
     const combinedState = createGraphState();
     const combined = buildCombinedGraph(nodeId, origNodes, origEdges);
 
     if (combined.hasCallers || combined.hasCallees) {
-        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedSel, combinedState, { focusNodeId: nodeId });
+        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedSel, combinedState, subGraphOptions);
     } else {
         combinedSel.append("div").attr("class", "empty-message").text("No callers or callees found for this function.");
     }
@@ -383,7 +458,7 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
         const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, cEdges, cNodes);
 
         if (calleeLevels.length > 1) {
-            renderGraph(calleeLevels, calleeDepth, cNodes, cEdges, calleeSel, calleeState, { focusNodeId: nodeId });
+            renderGraph(calleeLevels, calleeDepth, cNodes, cEdges, calleeSel, calleeState, subGraphOptions);
         } else {
             calleeSel.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
         }
@@ -406,7 +481,7 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
 
         if (rawCallerLevels.length > 1) {
             const flipped = flipGraph(rawCallerLevels, rawCallerDepth, reverseEdges);
-            renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerSel, callerState, { focusNodeId: nodeId });
+            renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerSel, callerState, subGraphOptions);
         } else {
             callerSel.append("div").attr("class", "empty-message").text("No callers found for this function.");
         }
