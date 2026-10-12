@@ -91,8 +91,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             nodeData.push({
                 id, depth, rawLabel, lines,
                 width: calculatedWidth, height: calculatedHeight,
-                folder: labelInfo.folder, file: labelInfo.file,
-                fileKey: makeFileKey(labelInfo.folder, labelInfo.file),
+                folder: isDummy ? null : labelInfo.folder,
+                file: isDummy ? null : labelInfo.file,
+                fileKey: isDummy ? null : makeFileKey(labelInfo.folder, labelInfo.file),
                 isDummy
             });
         });
@@ -401,14 +402,23 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // 4.5 Map dummy nodes to perfectly align with their final target node
     nodeData.forEach(d => {
         if (d.isDummy) {
-            const parts = String(d.id).split("|");
-            if (parts.length >= 3) {
-                const targetX = positionsX.get(parts[2]);
-                if (targetX !== undefined) {
-                    positionsX.set(d.id, targetX);
-                } else {
-                    positionsX.set(d.id, 0); // safe fallback
-                }
+            let realTgt = d.id;
+            const visited = new Set();
+            while (String(realTgt).startsWith("dummy|") && !visited.has(realTgt)) {
+                visited.add(realTgt);
+                const next = edges.get(realTgt);
+                if (next && next.length > 0) realTgt = next[0];
+                else break;
+            }
+            if (String(realTgt).startsWith("dummy|")) {
+                const parts = String(d.id).split("|");
+                if (parts.length >= 3) realTgt = parts[2];
+            }
+            const targetX = positionsX.get(realTgt);
+            if (targetX !== undefined) {
+                positionsX.set(d.id, targetX);
+            } else {
+                positionsX.set(d.id, 0); // safe fallback
             }
         }
     });
@@ -416,6 +426,41 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // 5. Generate links and perform Interval Graph Coloring
     const linkData = [];
     const layersEdges = Array.from({ length: levels.length }, () => []);
+    const reverseEdgesMap = buildReverseEdges(edges);
+
+    function findRealSource(id) {
+        let curr = id;
+        const visited = new Set();
+        while (String(curr).startsWith("dummy|") && !visited.has(curr)) {
+            visited.add(curr);
+            const prev = reverseEdgesMap.get(curr);
+            if (prev && prev.length > 0) {
+                curr = prev[0];
+            } else {
+                const parts = String(curr).split("|");
+                if (parts.length >= 2) curr = parts[1];
+                break;
+            }
+        }
+        return curr;
+    }
+
+    function findRealTarget(id) {
+        let curr = id;
+        const visited = new Set();
+        while (String(curr).startsWith("dummy|") && !visited.has(curr)) {
+            visited.add(curr);
+            const next = edges.get(curr);
+            if (next && next.length > 0) {
+                curr = next[0];
+            } else {
+                const parts = String(curr).split("|");
+                if (parts.length >= 3) curr = parts[2];
+                break;
+            }
+        }
+        return curr;
+    }
 
     for (const [from, targets] of edges.entries()) {
         const fromDepth = depthById.get(from);
@@ -428,8 +473,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             const targetX = positionsX.get(target);
             if (targetX === undefined) continue;
 
+            const isFromDummy = String(from).startsWith("dummy|");
+            const realFrom = isFromDummy ? findRealSource(from) : from;
+            const realTo = String(target).startsWith("dummy|") ? findRealTarget(target) : target;
+
             const edgeObj = {
                 fromId: from, toId: target, fromDepth: fromDepth,
+                realFromId: realFrom, realToId: realTo,
+                isFromDummy: isFromDummy,
                 leftX: Math.min(sourceX, targetX), rightX: Math.max(sourceX, targetX),
                 lane: 0
             };
@@ -506,7 +557,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     fileOrder.forEach(f => fileY.set(f, { minY: Infinity, maxY: -Infinity }));
 
     nodeData.forEach((d) => {
+        if (d.isDummy) return;
         const pos = positions.get(d.id);
+        if (!pos) return;
         const fBox = folderY.get(d.folder);
         if (fBox) {
             fBox.minY = Math.min(fBox.minY, pos.y - d.height / 2);
@@ -535,6 +588,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         // Folder box spans all distinct slot positions its files occupy
         let folderMinX = Infinity, folderMaxX = -Infinity;
         files.forEach(f => {
+            const fiBox = fileY.get(f);
+            if (!fiBox || fiBox.minY === Infinity) return;
             const sx = fileStartX.get(f);
             if (sx === undefined) return;
             const slotIdx = fileToSlot.get(f);
@@ -613,7 +668,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     folderBoxData.forEach(box => {
         if (box.collapsed) {
             nodeData.forEach(d => {
-                if (d.folder === box.folder) nodeContainerBounds.set(d.id, { isCollapsed: true, leftX: box.x, rightX: box.x + box.width });
+                if (!d.isDummy && d.folder === box.folder) nodeContainerBounds.set(d.id, { isCollapsed: true, leftX: box.x, rightX: box.x + box.width });
             });
         }
     });
@@ -621,7 +676,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     fileBoxData.forEach(box => {
         if (box.collapsed && !collapsedFolders.has(fileMetaByKey.get(box.file).folder)) {
             nodeData.forEach(d => {
-                if (d.fileKey === box.file) nodeContainerBounds.set(d.id, { isCollapsed: true, leftX: box.x, rightX: box.x + box.width });
+                if (!d.isDummy && d.fileKey === box.file) nodeContainerBounds.set(d.id, { isCollapsed: true, leftX: box.x, rightX: box.x + box.width });
             });
         }
     });
@@ -817,30 +872,58 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     };
 
     function buildPathLine(d, nodeDims, useOrthogonal) {
-        const hFrom = nodeDims.get(d.fromId).h;
-        const hTo = nodeDims.get(d.toId).h;
-
-        let startX = d.source.x;
-        let startY = d.source.y + (hFrom / 2);
-        let endX = d.target.x;
-        let endY = d.target.y - (hTo / 2);
-
-        const srcBounds = nodeContainerBounds.get(d.fromId);
-        const tgtBounds = nodeContainerBounds.get(d.toId);
-
-        if (srcBounds.isCollapsed) {
-            if (d.target.x > d.source.x) startX = srcBounds.rightX;
-            else if (d.target.x < d.source.x) startX = srcBounds.leftX;
-        }
-
-        if (tgtBounds.isCollapsed) {
-            if (d.source.x > d.target.x) endX = tgtBounds.rightX;
-            else if (d.source.x < d.target.x) endX = tgtBounds.leftX;
-        }
-
         if (!useOrthogonal) {
+            // When edge style is not orthogonal, dummy nodes should not create intersections or extra segments.
+            // The edge originating from a real node connects directly to the final real target.
+            // Subsequent segments in the dummy chain are not drawn.
+            if (d.isFromDummy) return "";
+
+            const targetId = d.realToId || d.toId;
+            const targetPos = positions.get(targetId) || d.target;
+            const hFrom = (nodeDims.get(d.fromId) || {}).h || 0;
+            const hTo = (nodeDims.get(targetId) || {}).h || 0;
+
+            let startX = d.source.x;
+            let startY = d.source.y + (hFrom / 2);
+            let endX = targetPos.x;
+            let endY = targetPos.y - (hTo / 2);
+
+            const srcBounds = nodeContainerBounds.get(d.fromId);
+            const tgtBounds = nodeContainerBounds.get(targetId);
+
+            if (srcBounds && srcBounds.isCollapsed) {
+                if (endX > startX) startX = srcBounds.rightX;
+                else if (endX < startX) startX = srcBounds.leftX;
+            }
+
+            if (tgtBounds && tgtBounds.isCollapsed) {
+                if (startX > endX) endX = tgtBounds.rightX;
+                else if (startX < endX) endX = tgtBounds.leftX;
+            }
+
             return `M ${startX} ${startY} L ${endX} ${endY}`;
         } else {
+            const hFrom = (nodeDims.get(d.fromId) || {}).h || 0;
+            const hTo = (nodeDims.get(d.toId) || {}).h || 0;
+
+            let startX = d.source.x;
+            let startY = d.source.y + (hFrom / 2);
+            let endX = d.target.x;
+            let endY = d.target.y - (hTo / 2);
+
+            const srcBounds = nodeContainerBounds.get(d.fromId);
+            const tgtBounds = nodeContainerBounds.get(d.toId);
+
+            if (srcBounds && srcBounds.isCollapsed) {
+                if (d.target.x > d.source.x) startX = srcBounds.rightX;
+                else if (d.target.x < d.source.x) startX = srcBounds.leftX;
+            }
+
+            if (tgtBounds && tgtBounds.isCollapsed) {
+                if (d.source.x > d.target.x) endX = tgtBounds.rightX;
+                else if (d.source.x < d.target.x) endX = tgtBounds.leftX;
+            }
+
             const verticalGap = (d.target.y - d.source.y) - (hFrom / 2) - (maxIndividualHeight / 2);
             const laneCount = d.totalLanesInLayer || 1;
             const laneOffset = ((d.lane + 1) / (laneCount + 1)) * verticalGap;
@@ -1247,9 +1330,45 @@ function buildReverseEdges(edges) {
 function getImmediateNeighbors(nodeId, edges, reverseEdges) {
     const connected = new Set([nodeId]);
     const children = edges.get(nodeId) || [];
-    children.forEach(child => connected.add(child));
+    children.forEach(child => {
+        if (String(child).startsWith("dummy|")) {
+            let realTgt = child;
+            const visited = new Set();
+            while (String(realTgt).startsWith("dummy|") && !visited.has(realTgt)) {
+                visited.add(realTgt);
+                const next = edges.get(realTgt);
+                if (next && next.length > 0) realTgt = next[0];
+                else break;
+            }
+            if (String(realTgt).startsWith("dummy|")) {
+                const parts = String(child).split("|");
+                if (parts.length >= 3) realTgt = parts[2];
+            }
+            connected.add(realTgt);
+        } else {
+            connected.add(child);
+        }
+    });
     const parents = reverseEdges.get(nodeId) || [];
-    parents.forEach(parent => connected.add(parent));
+    parents.forEach(parent => {
+        if (String(parent).startsWith("dummy|")) {
+            let realSrc = parent;
+            const visited = new Set();
+            while (String(realSrc).startsWith("dummy|") && !visited.has(realSrc)) {
+                visited.add(realSrc);
+                const prev = reverseEdges.get(realSrc);
+                if (prev && prev.length > 0) realSrc = prev[0];
+                else break;
+            }
+            if (String(realSrc).startsWith("dummy|")) {
+                const parts = String(parent).split("|");
+                if (parts.length >= 2) realSrc = parts[1];
+            }
+            connected.add(realSrc);
+        } else {
+            connected.add(parent);
+        }
+    });
     return connected;
 }
 
@@ -1397,8 +1516,14 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         const defaultEdgeOpacity = isSearchActive() ? 0.15 : 1;
         edgesSelection.each(function(d) {
             const edge = d3.select(this);
-            const isConnectedToPrimary = primaryId && (d.fromId === primaryId || d.toId === primaryId);
-            const isConnectedInActiveSet = activeSet.has(d.fromId) && activeSet.has(d.toId);
+            const isConnectedToPrimary = primaryId && (
+                d.fromId === primaryId || d.toId === primaryId ||
+                d.realFromId === primaryId || d.realToId === primaryId
+            );
+            const isConnectedInActiveSet = (
+                (activeSet.has(d.fromId) && activeSet.has(d.toId)) ||
+                (d.realFromId && d.realToId && activeSet.has(d.realFromId) && activeSet.has(d.realToId))
+            );
 
             edge.style("opacity", defaultEdgeOpacity);
 
@@ -1415,7 +1540,10 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         });
 
         // Layering order: active edges -> connected nodes -> primary node on top
-        edgesSelection.filter(d => activeSet.has(d.fromId) && activeSet.has(d.toId)).raise();
+        edgesSelection.filter(d => 
+            (activeSet.has(d.fromId) && activeSet.has(d.toId)) ||
+            (d.realFromId && d.realToId && activeSet.has(d.realFromId) && activeSet.has(d.realToId))
+        ).raise();
         nodesSelection.filter(d => activeSet.has(d.id) && d.id !== primaryId).raise();
         if (primaryId) {
             nodesSelection.filter(d => d.id === primaryId).raise();
@@ -1481,11 +1609,20 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         .attr("stroke-width", 1)
         .on("mouseover", function(event, d) {
             if (activeClickedNodeId) return;
-            const activeSet = new Set([d.fromId]);
-            const siblings = edgesMap.get(d.fromId) || [];
-            siblings.forEach(targetId => activeSet.add(targetId));
+            const origin = d.realFromId || d.fromId;
+            const target = d.realToId || d.toId;
+            const activeSet = new Set([origin, target]);
+            const siblings = edgesMap.get(origin) || [];
+            siblings.forEach(targetId => {
+                if (String(targetId).startsWith("dummy|")) {
+                    const realTgt = String(targetId).split("|")[2];
+                    if (realTgt) activeSet.add(realTgt);
+                } else {
+                    activeSet.add(targetId);
+                }
+            });
 
-            updateHighlightState(activeSet, d.fromId);
+            updateHighlightState(activeSet, origin);
         })
         .on("mouseout", function() {
             if (activeClickedNodeId) return;

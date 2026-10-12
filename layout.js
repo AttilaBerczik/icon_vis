@@ -224,6 +224,8 @@ function buildFolderFileIndex(levels, nodes) {
 
     levels.forEach((levelIds) => {
         levelIds.forEach((id) => {
+            if (String(id).startsWith("dummy|")) return;
+
             const folder = getNodeFolder(id, nodes);
             const file = getNodeFile(id, nodes);
             const fileKey = makeFileKey(folder, file);
