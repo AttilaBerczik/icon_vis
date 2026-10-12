@@ -57,6 +57,18 @@ function renderMainMode(nodes, edges) {
     const { levels, depthById } = buildLevels(rootId, edges, nodes);
     renderGraph(levels, depthById, nodes, edges, container, state, { collapseAllOnInit: true });
 
+    // Seed any remaining unreached folders/files in nodes to ensure they also have locked-in consistent colors
+    for (const [id, rawLabel] of nodes.entries()) {
+        const labelInfo = parseNodeLabel(rawLabel);
+        if (labelInfo.folder && window.getFolderColor) {
+            window.getFolderColor(labelInfo.folder);
+        }
+        const fileKey = makeFileKey(labelInfo.folder, labelInfo.file);
+        if (fileKey && window.getFileColor) {
+            window.getFileColor(fileKey);
+        }
+    }
+
     setupSearchUI(container.node());
 }
 

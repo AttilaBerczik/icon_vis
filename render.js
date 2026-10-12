@@ -1,6 +1,34 @@
 // Context menu target (shared across all graph instances on this page)
 let contextMenuNodeId = null;
 
+// Global persistent color maps ensuring 100% consistent folder and file box colors
+// across main view, side panel tabs, and sub-graphs.
+const globalFolderColorMap = new Map();
+const globalFileColorMap = new Map();
+
+function getFolderColor(folder) {
+    if (!folder) return "#94a3b8";
+    if (!globalFolderColorMap.has(folder)) {
+        const color = d3.schemeSet3[globalFolderColorMap.size % d3.schemeSet3.length];
+        globalFolderColorMap.set(folder, color);
+    }
+    return globalFolderColorMap.get(folder);
+}
+
+function getFileColor(fileKey) {
+    if (!fileKey) return "#64748b";
+    if (!globalFileColorMap.has(fileKey)) {
+        const color = d3.schemeCategory10[globalFileColorMap.size % d3.schemeCategory10.length];
+        globalFileColorMap.set(fileKey, color);
+    }
+    return globalFileColorMap.get(fileKey);
+}
+
+window.globalFolderColorMap = globalFolderColorMap;
+window.globalFileColorMap = globalFileColorMap;
+window.getFolderColor = getFolderColor;
+window.getFileColor = getFileColor;
+
 // State management factory — each graph instance gets its own state
 function createGraphState() {
     return {
@@ -94,6 +122,11 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     const fileOrder = flattenFileOrder(orderedFolders, orderedFilesByFolder);
     // ---------------------------
+
+    // Pre-register colors for all folders and files in this layout order
+    // to guarantee consistent indexing across views (even if folders/files are collapsed)
+    orderedFolders.forEach(folder => getFolderColor(folder));
+    fileOrder.forEach(file => getFileColor(file));
 
     // Collapse all folders and files on initial render
     if (state.isInitialRender) {
@@ -327,12 +360,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     });
 
     const boxPadding = 20;
-    const fileColorScale = d3.scaleOrdinal(d3.schemeCategory10);
-    const folderColorScale = d3.scaleOrdinal(d3.schemeSet3);
     const folderBoxData = [];
     const fileBoxData = [];
 
-    orderedFolders.forEach((folder, i) => {
+    orderedFolders.forEach((folder) => {
         const files = orderedFilesByFolder.get(folder) || [];
         if (files.length === 0) return;
         const yRange = folderY.get(folder);
@@ -350,12 +381,12 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             y: yRange.minY - 40,
             width: maxX - minX + 2 * boxPadding,
             height: yRange.maxY - yRange.minY + 60,
-            color: folderColorScale(i),
+            color: getFolderColor(folder),
             collapsed: isCollapsed
         });
     });
 
-    fileOrder.forEach((f, i) => {
+    fileOrder.forEach((f) => {
         const meta = fileMetaByKey.get(f);
         if (!meta) return;
         const yRange = fileY.get(f);
@@ -376,7 +407,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             y: yRange.minY - 20,
             width: maxX - minX + 2 * boxPadding,
             height: yRange.maxY - yRange.minY + 40,
-            color: fileColorScale(i),
+            color: getFileColor(f),
             collapsed: isCollapsed
         });
     });
