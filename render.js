@@ -49,6 +49,103 @@ function createGraphState() {
     };
 }
 
+// --- Spatial Index for Viewport Culling (Phase 1) ---
+class SpatialIndex {
+    constructor(cellSize = 600) {
+        this.cellSize = cellSize;
+        this.cells = new Map();
+    }
+
+    clear() {
+        this.cells.clear();
+    }
+
+    insert(item, minX, minY, maxX, maxY) {
+        if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+        const startC = Math.floor(minX / this.cellSize);
+        const endC = Math.floor(maxX / this.cellSize);
+        const startR = Math.floor(minY / this.cellSize);
+        const endR = Math.floor(maxY / this.cellSize);
+
+        for (let c = startC; c <= endC; c++) {
+            for (let r = startR; r <= endR; r++) {
+                const k = `${c},${r}`;
+                let list = this.cells.get(k);
+                if (!list) {
+                    list = [];
+                    this.cells.set(k, list);
+                }
+                list.push(item);
+            }
+        }
+    }
+
+    // Insert an item that may span a large area. Small items are inserted into
+    // every covered cell. Large items (long edges) are sampled along their
+    // bounding-box diagonal instead, which keeps the index size proportional to
+    // the span length rather than the spanned area. This prevents the index from
+    // exploding on very wide graphs (a single edge could otherwise occupy
+    // thousands of cells and hundreds of thousands of references).
+    insertSampled(item, minX, minY, maxX, maxY, maxCells = 256) {
+        if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+        const startC = Math.floor(minX / this.cellSize);
+        const endC = Math.floor(maxX / this.cellSize);
+        const startR = Math.floor(minY / this.cellSize);
+        const endR = Math.floor(maxY / this.cellSize);
+        const cellCount = (endC - startC + 1) * (endR - startR + 1);
+
+        if (cellCount <= maxCells) {
+            this.insert(item, minX, minY, maxX, maxY);
+            return;
+        }
+
+        const dx = maxX - minX;
+        const dy = maxY - minY;
+        const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / this.cellSize));
+        const seen = new Set();
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = minX + dx * t;
+            const y = minY + dy * t;
+            const k = `${Math.floor(x / this.cellSize)},${Math.floor(y / this.cellSize)}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            let list = this.cells.get(k);
+            if (!list) {
+                list = [];
+                this.cells.set(k, list);
+            }
+            list.push(item);
+        }
+    }
+
+    query(minX, minY, maxX, maxY) {
+        if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return [];
+        const startC = Math.floor(minX / this.cellSize);
+        const endC = Math.floor(maxX / this.cellSize);
+        const startR = Math.floor(minY / this.cellSize);
+        const endR = Math.floor(maxY / this.cellSize);
+
+        const seen = new Set();
+        const results = [];
+        for (let c = startC; c <= endC; c++) {
+            for (let r = startR; r <= endR; r++) {
+                const list = this.cells.get(`${c},${r}`);
+                if (list) {
+                    for (let i = 0; i < list.length; i++) {
+                        const item = list[i];
+                        if (!seen.has(item)) {
+                            seen.add(item);
+                            results.push(item);
+                        }
+                    }
+                }
+            }
+        }
+        return results;
+    }
+}
+
 function renderGraph(levels, depthById, nodes, edges, containerSel, state, options) {
     const focusNodeId = (options && options.focusNodeId) || null;
     if (focusNodeId) {
@@ -549,9 +646,29 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         positions.set(d.id, { x: positionsX.get(d.id), y: depthY[d.depth] });
     });
 
-    linkData.forEach((edge) => {
+    linkData.forEach((edge, index) => {
+        edge.edgeKey = `${edge.fromId}->${edge.toId}_${index}`;
         edge.source = positions.get(edge.fromId);
         edge.target = positions.get(edge.toId);
+
+        const targetId = edge.realToId || edge.toId;
+        const targetPos = positions.get(targetId) || edge.target;
+        const hFrom = (nodeDims.get(edge.fromId) || {}).h || 0;
+        const hTo = (nodeDims.get(edge.toId) || {}).h || 0;
+        const startY = (edge.source ? edge.source.y : 0) + hFrom / 2;
+        const endY = (edge.target ? edge.target.y : 0) - hTo / 2;
+        const directEndY = (targetPos ? targetPos.y : 0) - ((nodeDims.get(targetId) || {}).h || 0) / 2;
+
+        const sx = edge.source ? edge.source.x : 0;
+        const tx = edge.target ? edge.target.x : 0;
+        const dtx = targetPos ? targetPos.x : tx;
+
+        edge.bounds = {
+            minX: Math.min(sx, tx, dtx) - 16,
+            maxX: Math.max(sx, tx, dtx) + 16,
+            minY: Math.min(startY, endY, directEndY) - 16,
+            maxY: Math.max(startY, endY, directEndY) + 16
+        };
     });
 
     const svgHeightComputed = depthY[levels.length - 1] + maxIndividualHeight / 2 + margin.bottom;
@@ -822,15 +939,32 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .text(d => d.collapsed ? d.label.substring(0, 3) + ".." : d.label)
         .append("title").text(d => d.label);
 
-    // --- Render Edges ---
-    const edgesSelection = edgesGroup.selectAll("path").data(linkData).enter().append("path")
-        .attr("class", "graph-edge")
-        .attr("fill", "none").attr("stroke", "#94a3b8").attr("stroke-width", 1)
-        .attr("d", (d) => buildPathLine(d, nodeDims, document.getElementById("toggle-orthogonal")?.checked));
+    // Phase 2: Index edges by node ID for O(1) interaction lookups
+    const edgesByNodeId = new Map();
+    function indexEdge(id, edgeObj) {
+        if (!id) return;
+        let list = edgesByNodeId.get(id);
+        if (!list) {
+            list = [];
+            edgesByNodeId.set(id, list);
+        }
+        list.push(edgeObj);
+    }
+
+    linkData.forEach((d) => {
+        indexEdge(d.fromId, d);
+        indexEdge(d.toId, d);
+        if (d.realFromId && d.realFromId !== d.fromId) indexEdge(d.realFromId, d);
+        if (d.realToId && d.realToId !== d.toId) indexEdge(d.realToId, d);
+    });
+    state.edgesByNodeId = edgesByNodeId;
 
     container.node().updateEdgeRouting = function() {
         const isOrthogonal = document.getElementById("toggle-orthogonal")?.checked;
-        edgesSelection.attr("d", (d) => buildPathLine(d, nodeDims, isOrthogonal));
+        edgesGroup.selectAll("path.graph-edge").attr("d", (d) => buildPathLine(d, nodeDims, isOrthogonal));
+        if (typeof container.node().updateViewportCulling === "function") {
+            container.node().updateViewportCulling(true);
+        }
     };
 
     container.node().expandAll = function() {
@@ -1032,84 +1166,79 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         return "#1f2937";
     };
 
-    const nodesSelection = mainGroup.append("g").attr("class", "nodes")
-        .selectAll("g").data(visibleNodeData).enter().append("g")
-        .attr("class", d => {
-            const mt = getNodeMatchType(d);
-            let cls = "node-g";
-            if (mt) {
-                cls += ` search-match search-match-${mt}`;
-                if (d.id === activeMatchId) cls += " search-match-active";
-            }
-            if (isTabNode(d)) cls += " node-active-tab";
-            return cls;
-        })
-        .attr("transform", (d) => {
-            const position = positions.get(d.id);
-            return `translate(${position.x - d.width / 2}, ${position.y - d.height / 2})`;
-        });
+    const getNodeClass = (d) => {
+        const mt = getNodeMatchType(d);
+        let cls = "node-g";
+        if (mt) {
+            cls += ` search-match search-match-${mt}`;
+            if (d.id === activeMatchId) cls += " search-match-active";
+        }
+        if (isTabNode(d)) cls += " node-active-tab";
+        return cls;
+    };
 
-    nodesSelection.append("rect")
-        .attr("class", "node-rect")
-        .attr("width", d => d.width).attr("height", d => d.height)
-        .attr("rx", 6)
-        .attr("fill", d => getNodeRectFill(d))
-        .attr("stroke", d => getNodeRectStroke(d))
-        .attr("stroke-width", d => getNodeRectStrokeWidth(d))
-        .attr("filter", d => getNodeFilter(d));
+    function appendNodeText(selection) {
+        const textNodes = selection.append("text")
+            .attr("class", "node-text")
+            .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
+            .attr("text-anchor", "middle").attr("font-size", "12px")
+            .attr("fill", d => getNodeTextFill(d));
 
-    // Outer ring for active tab node
-    nodesSelection.filter(d => isTabNode(d))
-        .append("rect")
-        .attr("class", "active-tab-ring")
-        .attr("x", -3).attr("y", -3)
-        .attr("width", d => d.width + 6).attr("height", d => d.height + 6)
-        .attr("rx", 8)
-        .attr("fill", "none")
-        .attr("stroke", "#10b981")
-        .attr("stroke-width", 2)
-        .attr("stroke-dasharray", "4,2")
-        .style("pointer-events", "none");
+        textNodes.selectAll("tspan")
+            .data(d => d.lines.map((line, idx) => ({
+                line,
+                idx,
+                isFuncLine: idx === d.lines.length - 1,
+                matchType: getNodeMatchType(d),
+                isActiveMatch: d.id === activeMatchId,
+                isTabNode: isTabNode(d),
+                width: d.width
+            })))
+            .enter().append("tspan")
+            .attr("x", d => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
+            .attr("font-weight", d => {
+                if (d.isActiveMatch) return "800";
+                if (d.matchType === "function" && d.isFuncLine) return "800";
+                if (d.matchType) return "700";
+                if (d.isTabNode) return (d.isFuncLine ? "800" : "700");
+                return "normal";
+            })
+            .text(d => d.line);
+    }
 
-    // Outer pulsing ring for active search match
-    nodesSelection.filter(d => d.id === activeMatchId)
-        .append("rect")
-        .attr("class", "search-active-pulse")
-        .attr("x", -4).attr("y", -4)
-        .attr("width", d => d.width + 8).attr("height", d => d.height + 8)
-        .attr("rx", 9)
-        .attr("fill", "none")
-        .attr("stroke", "#ea580c")
-        .attr("stroke-width", 2.5)
-        .attr("stroke-dasharray", "4,3")
-        .style("pointer-events", "none");
+    const nodesGroup = mainGroup.append("g").attr("class", "nodes");
 
-    const textNodes = nodesSelection.append("text")
-        .attr("class", "node-text")
-        .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
-        .attr("text-anchor", "middle").attr("font-size", "12px")
-        .attr("fill", d => getNodeTextFill(d));
+    // Phase 1: Spatial indexes for high-performance viewport culling
+    const spatialNodeIndex = new SpatialIndex(600);
+    visibleNodeData.forEach(d => {
+        const pos = positions.get(d.id);
+        if (!pos) return;
+        const halfW = d.width / 2;
+        const halfH = d.height / 2;
+        d.bounds = {
+            minX: pos.x - halfW,
+            maxX: pos.x + halfW,
+            minY: pos.y - halfH,
+            maxY: pos.y + halfH
+        };
+        spatialNodeIndex.insert(d, d.bounds.minX, d.bounds.minY, d.bounds.maxX, d.bounds.maxY);
+    });
 
-    textNodes.selectAll("tspan")
-        .data(d => d.lines.map((line, idx) => ({
-            line,
-            idx,
-            isFuncLine: idx === d.lines.length - 1,
-            matchType: getNodeMatchType(d),
-            isActiveMatch: d.id === activeMatchId,
-            isTabNode: isTabNode(d),
-            width: d.width
-        })))
-        .enter().append("tspan")
-        .attr("x", d => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
-        .attr("font-weight", d => {
-            if (d.isActiveMatch) return "800";
-            if (d.matchType === "function" && d.isFuncLine) return "800";
-            if (d.matchType) return "700";
-            if (d.isTabNode) return (d.isFuncLine ? "800" : "700");
-            return "normal";
-        })
-        .text(d => d.line);
+    const spatialEdgeIndex = new SpatialIndex(600);
+    linkData.forEach(d => {
+        if (d.bounds) {
+            spatialEdgeIndex.insertSampled(d, d.bounds.minX, d.bounds.minY, d.bounds.maxX, d.bounds.maxY);
+        }
+    });
+
+    const nodeElementsById = new Map();
+    state.nodeElementsById = nodeElementsById;
+
+    if (isSearchActive) {
+        svg.classed("has-search-active", true);
+    } else {
+        svg.classed("has-search-active", false);
+    }
 
     // --- Layout Bounding Box for Viewport Visibility Tracking ---
     let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
@@ -1274,12 +1403,193 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             });
     });
 
+    attachInteractions(nodesGroup, edgesGroup, edges, svg, state, {
+        getNodeRectFill,
+        getNodeRectStroke,
+        getNodeRectStrokeWidth,
+        getNodeFilter,
+        getNodeTextFill,
+        isTabNode
+    }, options, container, nodeElementsById, edgesByNodeId);
+
+    // --- High-Performance Viewport Culling Engine (Phase 1) ---
+    function updateViewportCulling(force = false) {
+        const transform = state.currentZoomTransform || d3.zoomIdentity;
+        const k = transform.k || 1;
+        const vpW = (containerNode && containerNode.clientWidth > 0) ? containerNode.clientWidth : fallbackWidth;
+        const vpH = (containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : viewportHeight;
+
+        const isSmallGraph = visibleNodeData.length <= 150;
+        const showText = isSmallGraph || (k >= 0.16);
+
+        let culledNodes, culledEdges;
+        const isOrthogonal = document.getElementById("toggle-orthogonal")?.checked;
+
+        if (isSmallGraph) {
+            culledNodes = visibleNodeData;
+            culledEdges = isOrthogonal ? linkData : linkData.filter(e => !e.isFromDummy);
+        } else {
+            const bufferX = Math.max(350, vpW * 0.5) / k;
+            const bufferY = Math.max(350, vpH * 0.5) / k;
+            // Clamp the query rectangle to the layout bounding box (plus a small
+            // margin). Without this, zooming out makes the proportional buffer
+            // enormous and every cull scans hundreds of thousands of empty grid
+            // cells while allocating a string key per cell.
+            const viewMinX = Math.max(gMinX - 64, -transform.x / k - bufferX);
+            const viewMaxX = Math.min(gMaxX + 64, (vpW - transform.x) / k + bufferX);
+            const viewMinY = Math.max(gMinY - 64, -transform.y / k - bufferY);
+            const viewMaxY = Math.min(gMaxY + 64, (vpH - transform.y) / k + bufferY);
+
+            if (viewMinX > viewMaxX || viewMinY > viewMaxY) {
+                culledNodes = [];
+                culledEdges = [];
+            } else {
+                culledNodes = spatialNodeIndex.query(viewMinX, viewMinY, viewMaxX, viewMaxY);
+                const rawCulledEdges = spatialEdgeIndex.query(viewMinX, viewMinY, viewMaxX, viewMaxY);
+                culledEdges = isOrthogonal ? rawCulledEdges : rawCulledEdges.filter(e => !e.isFromDummy);
+            }
+        }
+
+        const highlight = (state.getActiveHighlight && state.getActiveHighlight()) || {};
+        const curActiveSet = highlight.activeSet;
+        const curPrimaryId = highlight.primaryId;
+
+        // --- 1. Nodes Enter / Update / Exit ---
+        const nodeSel = nodesGroup.selectAll("g.node-g")
+            .data(culledNodes, d => d.id);
+
+        nodeSel.exit().each(function(d) {
+            if (d) {
+                d._domEl = null;
+                d._hasText = false;
+                nodeElementsById.delete(d.id);
+            }
+        }).remove();
+
+        const enteredNodes = nodeSel.enter().append("g")
+            .attr("class", d => getNodeClass(d))
+            .attr("transform", (d) => {
+                const position = positions.get(d.id);
+                return `translate(${position.x - d.width / 2}, ${position.y - d.height / 2})`;
+            });
+
+        enteredNodes.append("rect")
+            .attr("class", "node-rect")
+            .attr("width", d => d.width).attr("height", d => d.height)
+            .attr("rx", 6)
+            .attr("fill", d => getNodeRectFill(d))
+            .attr("stroke", d => getNodeRectStroke(d))
+            .attr("stroke-width", d => getNodeRectStrokeWidth(d))
+            .attr("filter", d => getNodeFilter(d));
+
+        enteredNodes.filter(d => isTabNode(d))
+            .append("rect")
+            .attr("class", "active-tab-ring")
+            .attr("x", -3).attr("y", -3)
+            .attr("width", d => d.width + 6).attr("height", d => d.height + 6)
+            .attr("rx", 8)
+            .attr("fill", "none")
+            .attr("stroke", "#10b981")
+            .attr("stroke-width", 2)
+            .attr("stroke-dasharray", "4,2")
+            .style("pointer-events", "none");
+
+        enteredNodes.filter(d => d.id === activeMatchId)
+            .append("rect")
+            .attr("class", "search-active-pulse")
+            .attr("x", -4).attr("y", -4)
+            .attr("width", d => d.width + 8).attr("height", d => d.height + 8)
+            .attr("rx", 9)
+            .attr("fill", "none")
+            .attr("stroke", "#ea580c")
+            .attr("stroke-width", 2.5)
+            .attr("stroke-dasharray", "4,3")
+            .style("pointer-events", "none");
+
+        if (showText) {
+            appendNodeText(enteredNodes);
+        }
+
+        enteredNodes.each(function(d) {
+            d._domEl = this;
+            d._hasText = showText;
+            nodeElementsById.set(d.id, { el: this, d });
+
+            if (curActiveSet && curActiveSet.has(d.id)) {
+                if (d.id === curPrimaryId) {
+                    this.classList.add("node-primary-highlight");
+                } else {
+                    this.classList.add("node-connected-highlight");
+                }
+            }
+        });
+
+        // LOD text reconciliation for existing nodes
+        nodeSel.each(function(d) {
+            if (showText && !d._hasText) {
+                appendNodeText(d3.select(this));
+                d._hasText = true;
+            } else if (!showText && d._hasText) {
+                d3.select(this).select("text.node-text").remove();
+                d._hasText = false;
+            }
+        });
+
+        // --- 2. Edges Enter / Update / Exit ---
+        const edgeSel = edgesGroup.selectAll("path.graph-edge")
+            .data(culledEdges, d => d.edgeKey);
+
+        edgeSel.exit().each(function(d) {
+            if (d) d._domEl = null;
+        }).remove();
+
+        const enteredEdges = edgeSel.enter().append("path")
+            .attr("class", "graph-edge")
+            .attr("fill", "none").attr("stroke", "#94a3b8").attr("stroke-width", 1)
+            .attr("d", d => buildPathLine(d, nodeDims, isOrthogonal));
+
+        enteredEdges.each(function(d) {
+            d._domEl = this;
+            if (curActiveSet) {
+                const isConnectedToPrimary = curPrimaryId && (
+                    d.fromId === curPrimaryId || d.toId === curPrimaryId ||
+                    d.realFromId === curPrimaryId || d.realToId === curPrimaryId
+                );
+                const isConnectedInActiveSet = (
+                    (curActiveSet.has(d.fromId) && curActiveSet.has(d.toId)) ||
+                    (d.realFromId && d.realToId && curActiveSet.has(d.realFromId) && curActiveSet.has(d.realToId))
+                );
+
+                if (isConnectedToPrimary) {
+                    this.classList.add("edge-primary-highlight");
+                } else if (isConnectedInActiveSet) {
+                    this.classList.add("edge-connected-highlight");
+                }
+            }
+        });
+    }
+
+    let cullingRafId = null;
+    function scheduleCulling() {
+        if (cullingRafId) return;
+        cullingRafId = requestAnimationFrame(() => {
+            cullingRafId = null;
+            updateViewportCulling(false);
+        });
+    }
+
+    container.node().updateViewportCulling = updateViewportCulling;
+    state.updateViewportCulling = updateViewportCulling;
+
     if (window.ResizeObserver && containerNode) {
         if (containerNode._navResizeObserver) {
             containerNode._navResizeObserver.disconnect();
         }
         const ro = new ResizeObserver(() => {
             updateNavButton();
+            if (typeof container.node().updateViewportCulling === "function") {
+                container.node().updateViewportCulling(true);
+            }
         });
         ro.observe(containerNode);
         containerNode._navResizeObserver = ro;
@@ -1294,6 +1604,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             .call(zoom.transform, targetTransform)
             .on("end", () => {
                 updateNavButton();
+                updateViewportCulling(true);
             });
     };
 
@@ -1304,6 +1615,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             state.currentZoomTransform = event.transform;
             mainGroup.attr("transform", event.transform);
             updateNavButton();
+            scheduleCulling();
+        })
+        .on("end", () => {
+            if (cullingRafId) {
+                cancelAnimationFrame(cullingRafId);
+                cullingRafId = null;
+            }
+            updateViewportCulling(true);
         });
 
     svg.call(zoom);
@@ -1324,6 +1643,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     mainGroup.attr("transform", state.currentZoomTransform);
     updateNavButton();
 
+    // Initial render of culled viewport elements
+    updateViewportCulling(true);
+
     // If focusing on a search node, smoothly pan to it
     if (options && options.focusSearchNodeId && positions.has(options.focusSearchNodeId)) {
         const targetPos = positions.get(options.focusSearchNodeId);
@@ -1339,20 +1661,15 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             svg.transition()
                 .duration(500)
                 .ease(d3.easeCubicOut)
-                .call(zoom.transform, targetTransform);
+                .call(zoom.transform, targetTransform)
+                .on("end", () => {
+                    updateViewportCulling(true);
+                });
         } else {
             svg.call(zoom.transform, targetTransform);
+            updateViewportCulling(true);
         }
     }
-
-    attachInteractions(nodesSelection, edgesSelection, edges, svg, state, {
-        getNodeRectFill,
-        getNodeRectStroke,
-        getNodeRectStrokeWidth,
-        getNodeFilter,
-        getNodeTextFill,
-        isTabNode
-    }, options, container);
 }
 
 function renderError(message, containerSel) {
@@ -1447,155 +1764,89 @@ function getAllConnected(startId, edges, reverseEdges) {
     return connected;
 }
 
-function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, state, styleHelpers, options, container) {
+function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styleHelpers, options, container, nodeElementsById, edgesByNodeId) {
     const reverseEdgesMap = buildReverseEdges(edgesMap);
     let activeClickedNodeId = (state && state.activeClickedNodeId) || null;
+    let currentActiveSet = null;
+    let currentPrimaryId = null;
 
-    const {
-        getNodeRectFill = (d) => (d.depth === 0 ? "#2563eb" : "#e2e8f0"),
-        getNodeRectStroke = () => "#94a3b8",
-        getNodeRectStrokeWidth = () => 1,
-        getNodeFilter = () => null,
-        getNodeTextFill = (d) => (d.depth === 0 ? "#f8fafc" : "#1f2937"),
-        isTabNode = () => false
-    } = (styleHelpers || {});
+    const isDimEnabled = () => window.dimHighlightEnabled !== false;
 
-    const isSearchActive = () => !!(state && state.searchState && state.searchState.matchingNodeIds && state.searchState.matchingNodeIds.size > 0);
+    // True when the pointer moved from one interactive graph element to another
+    // (node <-> node or node <-> edge). In that case the upcoming mouseover will
+    // immediately replace the highlight, so we must NOT tear the highlight down
+    // in between: doing so toggles the global `has-highlight` dimming class twice
+    // per move, forcing thousands of opacity transitions and style recalcs.
+    function movedWithinGraph(relatedTarget) {
+        return !!(relatedTarget && relatedTarget.closest && relatedTarget.closest(".node-g, .graph-edge"));
+    }
 
     function updateHighlightState(activeSet, primaryId) {
+        // 1. Clear the previous highlight directly in the DOM. Querying the
+        //    visible selection avoids retaining references to elements that the
+        //    viewport-culling engine has since removed (a detached-DOM leak), and
+        //    is bounded by what is actually rendered at this moment.
+        if (currentActiveSet) {
+            nodesGroup.selectAll(".node-primary-highlight").classed("node-primary-highlight", false);
+            nodesGroup.selectAll(".node-connected-highlight").classed("node-connected-highlight", false);
+            edgesGroup.selectAll(".edge-primary-highlight").classed("edge-primary-highlight", false);
+            edgesGroup.selectAll(".edge-connected-highlight").classed("edge-connected-highlight", false);
+        }
+
+        currentActiveSet = activeSet;
+        currentPrimaryId = primaryId;
+
+        // If no activeSet, remove highlight classes and exit
         if (!activeSet) {
-            nodesSelection.each(function(d) {
-                const g = d3.select(this);
-                const tabActive = isTabNode ? isTabNode(d) : false;
-                g.classed("node-primary-highlight", false);
-                g.classed("node-connected-highlight", false);
-                g.classed("node-active-tab", tabActive);
-
-                if (isSearchActive()) {
-                    g.style("opacity", state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
-                } else {
-                    g.style("opacity", 1);
-                }
-                g.select("rect.node-rect")
-                    .attr("fill", getNodeRectFill(d))
-                    .attr("stroke", getNodeRectStroke(d))
-                    .attr("stroke-width", getNodeRectStrokeWidth(d))
-                    .style("filter", getNodeFilter(d) || "none");
-                g.select("text.node-text")
-                    .attr("fill", getNodeTextFill(d));
-                g.selectAll("tspan")
-                    .attr("font-weight", (t) => {
-                        if (t && t.isActiveMatch) return "800";
-                        if (t && t.matchType === "function" && t.isFuncLine) return "800";
-                        if (t && t.matchType) return "700";
-                        if (tabActive) return (t && t.isFuncLine ? "800" : "700");
-                        return "normal";
-                    });
-
-                g.selectAll(".active-tab-ring").remove();
-                if (tabActive) {
-                    g.append("rect")
-                        .attr("class", "active-tab-ring")
-                        .attr("x", -3).attr("y", -3)
-                        .attr("width", d.width + 6).attr("height", d.height + 6)
-                        .attr("rx", 8)
-                        .attr("fill", "none")
-                        .attr("stroke", "#10b981")
-                        .attr("stroke-width", 2)
-                        .attr("stroke-dasharray", "4,2")
-                        .style("pointer-events", "none");
-                }
-            });
-
-            if (isSearchActive()) {
-                edgesSelection.style("opacity", 0.15)
-                    .attr("stroke", "#94a3b8")
-                    .attr("stroke-width", 1);
-            } else {
-                edgesSelection.style("opacity", 1)
-                    .attr("stroke", "#94a3b8")
-                    .attr("stroke-width", 1);
-            }
+            svgEl.classed("has-highlight", false);
             return;
         }
 
-        nodesSelection.each(function(d) {
-            const g = d3.select(this);
-            const isPrimary = !!(primaryId && d.id === primaryId);
-            const isConnected = activeSet.has(d.id);
-            const tabActive = isTabNode ? isTabNode(d) : false;
+        // 2. Mark SVG with highlight & dimming classes (handled natively by CSS)
+        svgEl.classed("has-highlight", true);
+        svgEl.classed("dim-enabled", isDimEnabled());
 
-            g.classed("node-primary-highlight", isPrimary);
-            g.classed("node-connected-highlight", isConnected && !isPrimary);
-            g.classed("node-active-tab", tabActive);
-
-            if (isPrimary) {
-                // Primary node (Hovered or Clicked): MUCH stronger contrast
-                g.style("opacity", 1);
-                g.select("rect.node-rect")
-                    .attr("fill", "#0f172a") // Deep slate-900 / dark contrast
-                    .attr("stroke", tabActive ? "#34d399" : "#38bdf8") // Vivid luminous emerald or sky-blue border
-                    .attr("stroke-width", 3)
-                    .style("filter", tabActive ? "drop-shadow(0 4px 10px rgba(5, 150, 105, 0.55))" : "drop-shadow(0 4px 8px rgba(15, 23, 42, 0.45))");
-                g.select("text.node-text")
-                    .attr("fill", "#ffffff"); // Pure white
-                g.selectAll("tspan")
-                    .attr("font-weight", (t) => (t && t.isFuncLine ? "800" : "700"));
-            } else if (isConnected) {
-                // Connected nodes: SOMEWHAT stronger contrast
-                g.style("opacity", 1);
-                g.select("rect.node-rect")
-                    .attr("fill", tabActive ? "#059669" : "#2563eb") // Keep emerald if tab node, rich royal blue otherwise
-                    .attr("stroke", tabActive ? "#34d399" : "#1d4ed8") // Emerald border or deep blue border
-                    .attr("stroke-width", tabActive ? 2.5 : 2)
-                    .style("filter", tabActive ? "url(#glow-emerald)" : "none");
-                g.select("text.node-text")
-                    .attr("fill", "#ffffff"); // Pure white
-                g.selectAll("tspan")
-                    .attr("font-weight", (t) => (t && t.isFuncLine ? "700" : "600"));
-            } else {
-                // Non-highlighted nodes: keep opacity as before
-                if (isSearchActive()) {
-                    g.style("opacity", state.searchState.matchingNodeIds.has(d.id) ? 1 : 0.35);
-                } else {
-                    g.style("opacity", 1);
+        // 3. Highlight primary node
+        if (primaryId) {
+            const primaryObj = nodeElementsById.get(primaryId);
+            if (primaryObj && primaryObj.el) {
+                primaryObj.el.classList.add("node-primary-highlight");
+                // Bring only the primary node to the front so it stands out above overlapping boxes
+                if (primaryObj.el.parentNode) {
+                    primaryObj.el.parentNode.appendChild(primaryObj.el);
                 }
-                g.select("rect.node-rect")
-                    .attr("fill", getNodeRectFill(d))
-                    .attr("stroke", getNodeRectStroke(d))
-                    .attr("stroke-width", getNodeRectStrokeWidth(d))
-                    .style("filter", getNodeFilter(d) || "none");
-                g.select("text.node-text")
-                    .attr("fill", getNodeTextFill(d));
-                g.selectAll("tspan")
-                    .attr("font-weight", (t) => {
-                        if (t && t.isActiveMatch) return "800";
-                        if (t && t.matchType === "function" && t.isFuncLine) return "800";
-                        if (t && t.matchType) return "700";
-                        if (tabActive) return (t && t.isFuncLine ? "800" : "700");
-                        return "normal";
-                    });
             }
+        }
 
-            g.selectAll(".active-tab-ring").remove();
-            if (tabActive) {
-                g.append("rect")
-                    .attr("class", "active-tab-ring")
-                    .attr("x", -3).attr("y", -3)
-                    .attr("width", d.width + 6).attr("height", d.height + 6)
-                    .attr("rx", 8)
-                    .attr("fill", "none")
-                    .attr("stroke", "#10b981")
-                    .attr("stroke-width", 2)
-                    .attr("stroke-dasharray", "4,2")
-                    .style("pointer-events", "none");
+        // 4. Highlight connected nodes
+        for (const nodeId of activeSet) {
+            if (nodeId !== primaryId) {
+                const nodeObj = nodeElementsById.get(nodeId);
+                if (nodeObj && nodeObj.el) {
+                    nodeObj.el.classList.add("node-connected-highlight");
+                }
             }
-        });
+        }
 
-        // Edges styling: direct links to primary node are boldest, other active edges distinct; opacity preserved
-        const defaultEdgeOpacity = isSearchActive() ? 0.15 : 1;
-        edgesSelection.each(function(d) {
-            const edge = d3.select(this);
+        // 6. Highlight edges touching activeSet (indexed lookups)
+        const candidateEdges = new Set();
+        if (primaryId) {
+            const pEdges = edgesByNodeId.get(primaryId);
+            if (pEdges) {
+                for (let i = 0; i < pEdges.length; i++) candidateEdges.add(pEdges[i]);
+            }
+        }
+        for (const nodeId of activeSet) {
+            const nEdges = edgesByNodeId.get(nodeId);
+            if (nEdges) {
+                for (let i = 0; i < nEdges.length; i++) candidateEdges.add(nEdges[i]);
+            }
+        }
+
+        for (const edgeObj of candidateEdges) {
+            const d = edgeObj.d || edgeObj;
+            const el = edgeObj.el || edgeObj._domEl;
+            if (!el) continue;
             const isConnectedToPrimary = primaryId && (
                 d.fromId === primaryId || d.toId === primaryId ||
                 d.realFromId === primaryId || d.realToId === primaryId
@@ -1605,35 +1856,25 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
                 (d.realFromId && d.realToId && activeSet.has(d.realFromId) && activeSet.has(d.realToId))
             );
 
-            edge.style("opacity", defaultEdgeOpacity);
-
             if (isConnectedToPrimary) {
-                edge.attr("stroke", "#2563eb")
-                    .attr("stroke-width", 2.5);
+                el.classList.add("edge-primary-highlight");
             } else if (isConnectedInActiveSet) {
-                edge.attr("stroke", "#3b82f6")
-                    .attr("stroke-width", 2);
-            } else {
-                edge.attr("stroke", "#94a3b8")
-                    .attr("stroke-width", 1);
+                el.classList.add("edge-connected-highlight");
             }
-        });
-
-        // Layering order: active edges -> connected nodes -> primary node on top
-        edgesSelection.filter(d => 
-            (activeSet.has(d.fromId) && activeSet.has(d.toId)) ||
-            (d.realFromId && d.realToId && activeSet.has(d.realFromId) && activeSet.has(d.realToId))
-        ).raise();
-        nodesSelection.filter(d => activeSet.has(d.id) && d.id !== primaryId).raise();
-        if (primaryId) {
-            nodesSelection.filter(d => d.id === primaryId).raise();
         }
-        nodesSelection.filter(d => isTabNode && isTabNode(d) && d.id !== primaryId).raise();
     }
 
+    state.getActiveHighlight = () => ({
+        activeSet: currentActiveSet,
+        primaryId: currentPrimaryId
+    });
+    state.updateHighlightState = updateHighlightState;
+
     // Restore active clicked node or search state
-    if (activeClickedNodeId && nodesSelection.data().some(d => d.id === activeClickedNodeId)) {
-        const allConnected = getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
+    if (activeClickedNodeId && nodeElementsById.has(activeClickedNodeId)) {
+        const allConnected = window.getFullAllConnected ?
+            window.getFullAllConnected(activeClickedNodeId) :
+            getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
         updateHighlightState(allConnected, activeClickedNodeId);
     } else {
         activeClickedNodeId = null;
@@ -1641,50 +1882,73 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
         updateHighlightState(null, null);
     }
 
-    nodesSelection
-        .style("cursor", "pointer")
-        .on("mouseover", function(event, d) {
+    // --- High-Performance Event Delegation on Nodes Group ---
+    nodesGroup
+        .on("mouseover", function(event) {
             if (activeClickedNodeId) return;
-            const immediateNeighbors = getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
+            const nodeG = event.target.closest(".node-g");
+            if (!nodeG) return;
+            if (event.relatedTarget && event.relatedTarget.closest(".node-g") === nodeG) return;
+
+            const d = nodeG.__data__;
+            if (!d) return;
+
+            const immediateNeighbors = window.getFullImmediateNeighbors ?
+                window.getFullImmediateNeighbors(d.id) :
+                getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
             updateHighlightState(immediateNeighbors, d.id);
             if (options && typeof options.onNodeHover === "function") {
-                options.onNodeHover(d.id);
+                options.onNodeHover(d.id, immediateNeighbors);
             }
         })
-        .on("mouseout", function() {
+        .on("mouseout", function(event) {
             if (activeClickedNodeId) return;
+            const nodeG = event.target.closest(".node-g");
+            if (!nodeG) return;
+            if (event.relatedTarget && event.relatedTarget.closest(".node-g") === nodeG) return;
+            if (movedWithinGraph(event.relatedTarget)) return;
+
             updateHighlightState(null, null);
             if (options && typeof options.onNodeMouseOut === "function") {
                 options.onNodeMouseOut();
             }
         })
-        .on("click", function(event, d) {
+        .on("click", function(event) {
+            const nodeG = event.target.closest(".node-g");
+            if (!nodeG) return;
+            const d = nodeG.__data__;
+            if (!d) return;
+
             if (activeClickedNodeId === d.id) {
                 activeClickedNodeId = null;
                 if (state) state.activeClickedNodeId = null;
                 updateHighlightState(null, null);
                 if (options && typeof options.onNodeClick === "function") {
-                    options.onNodeClick(null);
+                    options.onNodeClick(null, null);
                 }
             } else {
                 activeClickedNodeId = d.id;
                 if (state) state.activeClickedNodeId = d.id;
-                const allConnected = getAllConnected(d.id, edgesMap, reverseEdgesMap);
+                const allConnected = window.getFullAllConnected ?
+                    window.getFullAllConnected(d.id) :
+                    getAllConnected(d.id, edgesMap, reverseEdgesMap);
                 updateHighlightState(allConnected, d.id);
                 if (options && typeof options.onNodeClick === "function") {
-                    options.onNodeClick(d.id);
+                    options.onNodeClick(d.id, allConnected);
                 }
             }
             event.stopPropagation();
         })
-        .on("contextmenu", function(event, d) {
+        .on("contextmenu", function(event) {
+            const nodeG = event.target.closest(".node-g");
+            if (!nodeG) return;
+            const d = nodeG.__data__;
+            if (!d || d.isDummy) return;
+
             event.preventDefault();
             event.stopPropagation();
 
-            if (d.isDummy) return;
-
             contextMenuNodeId = d.id;
-
             const ctxMenu = document.getElementById("context-menu");
             if (!ctxMenu) return;
 
@@ -1697,11 +1961,17 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             ctxMenu.style.top = event.clientY + "px";
         });
 
-    edgesSelection
-        .style("cursor", "crosshair")
-        .attr("stroke-width", 1)
-        .on("mouseover", function(event, d) {
+    // --- High-Performance Event Delegation on Edges Group ---
+    edgesGroup
+        .on("mouseover", function(event) {
             if (activeClickedNodeId) return;
+            const edgePath = event.target.closest(".graph-edge");
+            if (!edgePath) return;
+            if (event.relatedTarget && event.relatedTarget.closest(".graph-edge") === edgePath) return;
+
+            const d = edgePath.__data__;
+            if (!d) return;
+
             const origin = d.realFromId || d.fromId;
             const target = d.realToId || d.toId;
             const activeSet = new Set([origin, target]);
@@ -1716,10 +1986,21 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             });
 
             updateHighlightState(activeSet, origin);
+            if (options && typeof options.onNodeHover === "function") {
+                options.onNodeHover(origin, activeSet);
+            }
         })
-        .on("mouseout", function() {
+        .on("mouseout", function(event) {
             if (activeClickedNodeId) return;
+            const edgePath = event.target.closest(".graph-edge");
+            if (!edgePath) return;
+            if (event.relatedTarget && event.relatedTarget.closest(".graph-edge") === edgePath) return;
+            if (movedWithinGraph(event.relatedTarget)) return;
+
             updateHighlightState(null, null);
+            if (options && typeof options.onNodeMouseOut === "function") {
+                options.onNodeMouseOut();
+            }
         });
 
     svgEl.on("click", (event) => {
@@ -1729,7 +2010,7 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
             if (state) state.activeClickedNodeId = null;
             updateHighlightState(null, null);
             if (options && typeof options.onNodeClick === "function") {
-                options.onNodeClick(null);
+                options.onNodeClick(null, null);
             }
         }
         // Hide context menu on background click
@@ -1739,28 +2020,32 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
 
     if (container && container.node()) {
         const cNode = container.node();
-        cNode.highlightNodeHover = function(nodeId) {
+        cNode.highlightNodeHover = function(nodeId, passedActiveSet) {
             if (activeClickedNodeId) return;
             if (!nodeId) {
                 updateHighlightState(null, null);
                 return;
             }
-            if (nodesSelection.data().some(d => d.id === nodeId)) {
-                const immediateNeighbors = getImmediateNeighbors(nodeId, edgesMap, reverseEdgesMap);
-                updateHighlightState(immediateNeighbors, nodeId);
-            }
+            const activeSet = passedActiveSet || (
+                window.getFullImmediateNeighbors ?
+                    window.getFullImmediateNeighbors(nodeId) :
+                    getImmediateNeighbors(nodeId, edgesMap, reverseEdgesMap)
+            );
+            updateHighlightState(activeSet, nodeId);
         };
 
         cNode.clearNodeHover = function() {
             if (activeClickedNodeId) {
-                const allConnected = getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
+                const allConnected = window.getFullAllConnected ?
+                    window.getFullAllConnected(activeClickedNodeId) :
+                    getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
                 updateHighlightState(allConnected, activeClickedNodeId);
             } else {
                 updateHighlightState(null, null);
             }
         };
 
-        cNode.selectNode = function(nodeId) {
+        cNode.selectNode = function(nodeId, passedActiveSet) {
             if (!nodeId || activeClickedNodeId === nodeId) {
                 activeClickedNodeId = null;
                 if (state) state.activeClickedNodeId = null;
@@ -1797,7 +2082,11 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
 
             activeClickedNodeId = nodeId;
             if (state) state.activeClickedNodeId = nodeId;
-            const allConnected = getAllConnected(nodeId, edgesMap, reverseEdgesMap);
+            const allConnected = passedActiveSet || (
+                window.getFullAllConnected ?
+                    window.getFullAllConnected(nodeId) :
+                    getAllConnected(nodeId, edgesMap, reverseEdgesMap)
+            );
             updateHighlightState(allConnected, nodeId);
         };
 
@@ -1830,12 +2119,40 @@ function attachInteractions(nodesSelection, edgesSelection, edgesMap, svgEl, sta
                 return;
             }
 
+            // Update tab highlight ring in-place
+            if (nodesGroup) {
+                nodesGroup.selectAll(".node-active-tab").classed("node-active-tab", false);
+                nodesGroup.selectAll(".active-tab-ring").remove();
+
+                if (nodeId && nodeElementsById.has(nodeId)) {
+                    const targetObj = nodeElementsById.get(nodeId);
+                    d3.select(targetObj.el).classed("node-active-tab", true);
+                    const d = targetObj.d;
+                    d3.select(targetObj.el).append("rect")
+                        .attr("class", "active-tab-ring")
+                        .attr("x", -3).attr("y", -3)
+                        .attr("width", d.width + 6).attr("height", d.height + 6)
+                        .attr("rx", 8)
+                        .attr("fill", "none")
+                        .attr("stroke", "#10b981")
+                        .attr("stroke-width", 2)
+                        .attr("stroke-dasharray", "4,2")
+                        .style("pointer-events", "none");
+                }
+            }
+
             if (activeClickedNodeId) {
-                const allConnected = getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
+                const allConnected = window.getFullAllConnected ?
+                    window.getFullAllConnected(activeClickedNodeId) :
+                    getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
                 updateHighlightState(allConnected, activeClickedNodeId);
             } else {
                 updateHighlightState(null, null);
             }
+        };
+
+        cNode.refreshHighlight = function() {
+            updateHighlightState(currentActiveSet, currentPrimaryId);
         };
     }
 }
@@ -2017,47 +2334,27 @@ function updateActiveSearchMatchInDOM(container, state, targetId) {
     const nodesGroup = container.select("g.nodes");
     if (nodesGroup.empty()) return;
 
-    // Remove old active pulse rings
+    // Remove old active pulse rings and class in O(1)
     nodesGroup.selectAll(".search-active-pulse").remove();
+    nodesGroup.selectAll(".search-match-active").classed("search-match-active", false);
 
-    // Update node groups in-place
-    nodesGroup.selectAll("g.node-g").each(function(d) {
-        const isTarget = d.id === targetId;
-        const mt = searchState.matchingTypes.get(d.id);
-        const g = d3.select(this);
-
-        if (mt) {
-            g.classed("search-match-active", isTarget);
-            const rect = g.select("rect.node-rect");
-            const text = g.select("text");
-
-            if (isTarget) {
-                rect.attr("fill", "#ff5722")
-                    .attr("stroke", "#b91c1c")
-                    .attr("stroke-width", 3.5)
-                    .attr("filter", "url(#glow-active)");
-                text.attr("fill", "#ffffff");
-
-                // Add active pulsing ring
-                g.append("rect")
-                    .attr("class", "search-active-pulse")
-                    .attr("x", -4).attr("y", -4)
-                    .attr("width", d.width + 8).attr("height", d.height + 8)
-                    .attr("rx", 9)
-                    .attr("fill", "none")
-                    .attr("stroke", "#ea580c")
-                    .attr("stroke-width", 2.5)
-                    .attr("stroke-dasharray", "4,3")
-                    .style("pointer-events", "none");
-            } else {
-                rect.attr("fill", mt === "function" ? "#f59e0b" : (mt === "file" ? "#8b5cf6" : "#06b6d4"))
-                    .attr("stroke", mt === "function" ? "#b45309" : (mt === "file" ? "#5b21b6" : "#0e7490"))
-                    .attr("stroke-width", 2.5)
-                    .attr("filter", "url(#glow-amber)");
-                text.attr("fill", mt === "function" ? "#0f172a" : "#ffffff");
-            }
-        }
-    });
+    // Highlight only the new active match
+    const targetObj = state.nodeElementsById?.get(targetId);
+    if (targetObj && targetObj.el) {
+        const g = d3.select(targetObj.el);
+        g.classed("search-match-active", true);
+        const d = targetObj.d;
+        g.append("rect")
+            .attr("class", "search-active-pulse")
+            .attr("x", -4).attr("y", -4)
+            .attr("width", d.width + 8).attr("height", d.height + 8)
+            .attr("rx", 9)
+            .attr("fill", "none")
+            .attr("stroke", "#ea580c")
+            .attr("stroke-width", 2.5)
+            .attr("stroke-dasharray", "4,3")
+            .style("pointer-events", "none");
+    }
 
     // Pan camera smoothly
     const pos = state.nodePositions?.get(targetId);

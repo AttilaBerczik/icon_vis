@@ -19,6 +19,8 @@ class DetailPanelManager {
 
         this.isResizing = false;
         this.defaultPanelWidth = 520;
+        this.selectedNodeId = null;
+        this.selectedActiveSet = null;
     }
 
     init(nodes, edges) {
@@ -182,6 +184,10 @@ class DetailPanelManager {
         this.activeTabId = tabId;
         this.notifyActiveNodeChanged(nodeId);
 
+        if (this.selectedNodeId) {
+            this.selectNode(this.selectedNodeId, this.selectedActiveSet);
+        }
+
         // Scroll tab bar to make new tab visible
         tabBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
 
@@ -218,6 +224,10 @@ class DetailPanelManager {
         });
 
         this.notifyActiveNodeChanged(tab.nodeId);
+
+        if (this.selectedNodeId) {
+            this.selectNode(this.selectedNodeId, this.selectedActiveSet);
+        }
     }
 
     closeTab(tabId) {
@@ -268,14 +278,14 @@ class DetailPanelManager {
         }
     }
 
-    highlightNodeHover(nodeId) {
+    highlightNodeHover(nodeId, activeSet) {
         if (!this.contentArea) return;
         const activeTab = this.tabs.find(t => t.id === this.activeTabId);
         if (!activeTab || !activeTab.contentContainer) return;
         const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
         vizNodes.forEach(node => {
             if (node.style.display !== "none" && typeof node.highlightNodeHover === "function") {
-                node.highlightNodeHover(nodeId);
+                node.highlightNodeHover(nodeId, activeSet);
             }
         });
     }
@@ -292,14 +302,28 @@ class DetailPanelManager {
         });
     }
 
-    selectNode(nodeId) {
+    selectNode(nodeId, activeSet) {
+        this.selectedNodeId = nodeId;
+        this.selectedActiveSet = activeSet;
         if (!this.contentArea) return;
         const activeTab = this.tabs.find(t => t.id === this.activeTabId);
         if (!activeTab || !activeTab.contentContainer) return;
         const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
         vizNodes.forEach(node => {
             if (node.style.display !== "none" && typeof node.selectNode === "function") {
-                node.selectNode(nodeId);
+                node.selectNode(nodeId, activeSet);
+            }
+        });
+    }
+
+    refreshHighlight() {
+        if (!this.contentArea) return;
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        if (!activeTab || !activeTab.contentContainer) return;
+        const vizNodes = activeTab.contentContainer.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (node.style.display !== "none" && typeof node.refreshHighlight === "function") {
+                node.refreshHighlight();
             }
         });
     }
@@ -411,10 +435,10 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     const subGraphOptions = {
         focusNodeId: nodeId,
         isSubGraph: true,
-        onNodeHover: (hId) => {
+        onNodeHover: (hId, activeSet) => {
             const leftViz = document.getElementById("visualization");
             if (leftViz && typeof leftViz.highlightNodeHover === "function") {
-                leftViz.highlightNodeHover(hId);
+                leftViz.highlightNodeHover(hId, activeSet);
             }
         },
         onNodeMouseOut: () => {
@@ -423,10 +447,14 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
                 leftViz.clearNodeHover();
             }
         },
-        onNodeClick: (cId) => {
+        onNodeClick: (cId, activeSet) => {
+            if (window.detailPanelManager) {
+                window.detailPanelManager.selectedNodeId = cId;
+                window.detailPanelManager.selectedActiveSet = activeSet;
+            }
             const leftViz = document.getElementById("visualization");
             if (leftViz && typeof leftViz.selectNode === "function") {
-                leftViz.selectNode(cId);
+                leftViz.selectNode(cId, activeSet);
             }
         }
     };
@@ -499,6 +527,13 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
 
         if (activeType === "callees") renderCalleesOnce();
         if (activeType === "callers") renderCallersOnce();
+
+        if (window.detailPanelManager && window.detailPanelManager.selectedNodeId) {
+            const targetViz = activeType === "combined" ? combinedViz : (activeType === "callees" ? calleeViz : callerViz);
+            if (targetViz && typeof targetViz.selectNode === "function") {
+                targetViz.selectNode(window.detailPanelManager.selectedNodeId, window.detailPanelManager.selectedActiveSet);
+            }
+        }
     }
 
     btnCombined.addEventListener("click", () => showSubTab("combined"));

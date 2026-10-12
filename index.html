@@ -201,19 +201,162 @@
 
         /* --- Node & Edge Highlighting Contrast & Transitions --- */
         .node-g {
-            transition: opacity 0.15s ease;
+            cursor: pointer;
+            transition: opacity 0.12s ease;
         }
 
         .node-rect {
-            transition: fill 0.15s ease, stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+            transition: fill 0.12s ease, stroke 0.12s ease, stroke-width 0.12s ease, filter 0.12s ease;
         }
 
         .node-text {
-            transition: fill 0.15s ease;
+            transition: fill 0.12s ease;
+            user-select: none;
+            pointer-events: none;
         }
 
         .graph-edge {
-            transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+            cursor: crosshair;
+            transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
+        }
+
+        /* Container-level dimming (O(1) browser-native CSS opacity handling) */
+        svg.has-highlight.dim-enabled .node-g {
+            opacity: 0.5;
+        }
+
+        svg.has-highlight.dim-enabled .graph-edge {
+            opacity: 0.5;
+        }
+
+        /* Search active dimming */
+        svg.has-search-active .node-g {
+            opacity: 0.35;
+        }
+
+        svg.has-search-active .node-g.search-match {
+            opacity: 1;
+        }
+
+        svg.has-search-active .graph-edge {
+            opacity: 0.15;
+        }
+
+        svg.has-search-active.has-highlight.dim-enabled .node-g {
+            opacity: 0.25;
+        }
+
+        svg.has-search-active.has-highlight.dim-enabled .node-g.search-match {
+            opacity: 0.5;
+        }
+
+        /* Active highlight states always stay 100% visible */
+        svg .node-g.node-primary-highlight,
+        svg .node-g.node-connected-highlight {
+            opacity: 1 !important;
+        }
+
+        /* Primary node (hovered or clicked) */
+        .node-g.node-primary-highlight .node-rect {
+            fill: #0f172a !important;
+            stroke: #38bdf8 !important;
+            stroke-width: 3px !important;
+            filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.45)) !important;
+        }
+
+        .node-g.node-primary-highlight.node-active-tab .node-rect {
+            stroke: #34d399 !important;
+            filter: drop-shadow(0 4px 10px rgba(5, 150, 105, 0.55)) !important;
+        }
+
+        .node-g.node-primary-highlight .node-text {
+            fill: #ffffff !important;
+        }
+
+        .node-g.node-primary-highlight .node-text tspan {
+            font-weight: 700 !important;
+        }
+
+        .node-g.node-primary-highlight .node-text tspan:last-child {
+            font-weight: 800 !important;
+        }
+
+        /* Connected nodes */
+        .node-g.node-connected-highlight .node-rect {
+            fill: #2563eb !important;
+            stroke: #1d4ed8 !important;
+            stroke-width: 2px !important;
+            filter: none !important;
+        }
+
+        .node-g.node-connected-highlight.node-active-tab .node-rect {
+            fill: #059669 !important;
+            stroke: #34d399 !important;
+            stroke-width: 2.5px !important;
+            filter: url(#glow-emerald) !important;
+        }
+
+        .node-g.node-connected-highlight .node-text {
+            fill: #ffffff !important;
+        }
+
+        .node-g.node-connected-highlight .node-text tspan {
+            font-weight: 600 !important;
+        }
+
+        .node-g.node-connected-highlight .node-text tspan:last-child {
+            font-weight: 700 !important;
+        }
+
+        /* Edge highlighting */
+        svg .graph-edge.edge-primary-highlight {
+            opacity: 1 !important;
+            stroke: #2563eb !important;
+            stroke-width: 2.5px !important;
+        }
+
+        svg .graph-edge.edge-connected-highlight {
+            opacity: 1 !important;
+            stroke: #3b82f6 !important;
+            stroke-width: 2px !important;
+        }
+
+        /* Search match styling */
+        .node-g.search-match-active .node-rect {
+            fill: #ff5722 !important;
+            stroke: #b91c1c !important;
+            stroke-width: 3.5px !important;
+            filter: url(#glow-active) !important;
+        }
+        .node-g.search-match-active .node-text {
+            fill: #ffffff !important;
+        }
+        .node-g.search-match-function .node-rect {
+            fill: #f59e0b;
+            stroke: #b45309;
+            stroke-width: 2.5px;
+            filter: url(#glow-amber);
+        }
+        .node-g.search-match-function .node-text {
+            fill: #0f172a;
+        }
+        .node-g.search-match-file .node-rect {
+            fill: #8b5cf6;
+            stroke: #5b21b6;
+            stroke-width: 2.5px;
+            filter: url(#glow-amber);
+        }
+        .node-g.search-match-file .node-text {
+            fill: #ffffff;
+        }
+        .node-g.search-match-folder .node-rect {
+            fill: #06b6d4;
+            stroke: #0e7490;
+            stroke-width: 2.5px;
+            filter: url(#glow-amber);
+        }
+        .node-g.search-match-folder .node-text {
+            fill: #ffffff;
         }
 
         /* --- Sub-graph Header --- */
@@ -329,6 +472,19 @@
         .control-btn:active {
             background: #cbd5e1;
             transform: scale(0.97);
+        }
+
+        .control-btn.toggle-btn.active {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #1d4ed8;
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
+        }
+
+        .control-btn.toggle-btn.active:hover {
+            background: #1d4ed8;
+            color: #ffffff;
+            border-color: #1e40af;
         }
 
         /* --- Visualization Containers --- */
@@ -786,6 +942,8 @@
                     <label><input type="checkbox" id="toggle-orthogonal"> Orthogonal</label>
                     <label><input type="checkbox" id="toggle-boxes" checked> File Boxes</label>
                     <label><input type="checkbox" id="toggle-folder-boxes" checked> Folder Boxes</label>
+                    <span class="control-divider"></span>
+                    <button type="button" id="btn-toggle-dim" class="control-btn toggle-btn active" title="Toggle dimming unhighlighted elements to 50% opacity">◐ Dim Others: ON</button>
                     <span class="control-divider"></span>
                     <div class="collapse-controls">
                         <button type="button" id="btn-open-all" class="control-btn" title="Open everything: expand all folders and files">Open All</button>

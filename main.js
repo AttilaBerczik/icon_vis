@@ -19,6 +19,22 @@ fetch("callgraph_folders.dot")
         const pristineNodes = cloneNodes(nodes);
         const pristineEdges = cloneEdges(edges);
 
+        // Build global full graph edge maps for consistent highlight and dimming across all views
+        const fullEdgesMap = new Map();
+        const fullReverseEdgesMap = new Map();
+        for (const e of pristineEdges) {
+            if (!fullEdgesMap.has(e.from)) fullEdgesMap.set(e.from, []);
+            fullEdgesMap.get(e.from).push(e.to);
+            if (!fullReverseEdgesMap.has(e.to)) fullReverseEdgesMap.set(e.to, []);
+            fullReverseEdgesMap.get(e.to).push(e.from);
+        }
+        window.getFullImmediateNeighbors = function(nodeId) {
+            return getImmediateNeighbors(nodeId, fullEdgesMap, fullReverseEdgesMap);
+        };
+        window.getFullAllConnected = function(nodeId) {
+            return getAllConnected(nodeId, fullEdgesMap, fullReverseEdgesMap);
+        };
+
         if (window.DetailPanelManager) {
             window.detailPanelManager = new DetailPanelManager();
             window.detailPanelManager.init(pristineNodes, pristineEdges);
@@ -57,9 +73,9 @@ function renderMainMode(nodes, edges) {
     const { levels, depthById } = buildLevels(rootId, edges, nodes);
     renderGraph(levels, depthById, nodes, edges, container, state, {
         collapseAllOnInit: true,
-        onNodeHover: (hId) => {
+        onNodeHover: (hId, activeSet) => {
             if (window.detailPanelManager && typeof window.detailPanelManager.highlightNodeHover === "function") {
-                window.detailPanelManager.highlightNodeHover(hId);
+                window.detailPanelManager.highlightNodeHover(hId, activeSet);
             }
         },
         onNodeMouseOut: () => {
@@ -67,9 +83,9 @@ function renderMainMode(nodes, edges) {
                 window.detailPanelManager.clearNodeHover();
             }
         },
-        onNodeClick: (cId) => {
+        onNodeClick: (cId, activeSet) => {
             if (window.detailPanelManager && typeof window.detailPanelManager.selectNode === "function") {
-                window.detailPanelManager.selectNode(cId);
+                window.detailPanelManager.selectNode(cId, activeSet);
             }
         }
     });
@@ -119,8 +135,28 @@ function renderSubGraphMode(nodeId, nodes, edges) {
     const combinedState = createGraphState();
     const combined = buildCombinedGraph(nodeId, origNodes, origEdges);
 
+    const subGraphModeOptions = {
+        focusNodeId: nodeId,
+        isSubGraph: true,
+        onNodeHover: (hId, activeSet) => {
+            if (window.detailPanelManager && typeof window.detailPanelManager.highlightNodeHover === "function") {
+                window.detailPanelManager.highlightNodeHover(hId, activeSet);
+            }
+        },
+        onNodeMouseOut: () => {
+            if (window.detailPanelManager && typeof window.detailPanelManager.clearNodeHover === "function") {
+                window.detailPanelManager.clearNodeHover();
+            }
+        },
+        onNodeClick: (cId, activeSet) => {
+            if (window.detailPanelManager && typeof window.detailPanelManager.selectNode === "function") {
+                window.detailPanelManager.selectNode(cId, activeSet);
+            }
+        }
+    };
+
     if (combined.hasCallers || combined.hasCallees) {
-        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedContainer, combinedState, { focusNodeId: nodeId });
+        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedContainer, combinedState, subGraphModeOptions);
     } else {
         combinedContainer.append("div").attr("class", "empty-message").text("No callers or callees found for this function.");
     }
@@ -139,7 +175,7 @@ function renderSubGraphMode(nodeId, nodes, edges) {
         const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, calleeEdges, calleeNodes);
 
         if (calleeLevels.length > 1) {
-            renderGraph(calleeLevels, calleeDepth, calleeNodes, calleeEdges, calleeContainer, calleeState, { focusNodeId: nodeId });
+            renderGraph(calleeLevels, calleeDepth, calleeNodes, calleeEdges, calleeContainer, calleeState, subGraphModeOptions);
         } else {
             calleeContainer.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
         }
@@ -160,7 +196,7 @@ function renderSubGraphMode(nodeId, nodes, edges) {
 
         if (rawCallerLevels.length > 1) {
             const flipped = flipGraph(rawCallerLevels, rawCallerDepth, reverseEdges);
-            renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerContainer, callerState, { focusNodeId: nodeId });
+            renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerContainer, callerState, subGraphModeOptions);
         } else {
             callerContainer.append("div").attr("class", "empty-message").text("No callers found for this function.");
         }
@@ -229,6 +265,42 @@ if (toggleOrthogonal) {
         if (window.detailPanelManager) {
             window.detailPanelManager.updateEdgeRouting();
         }
+    });
+}
+
+// --- Dim Unhighlighted Toggle Control ---
+window.dimHighlightEnabled = true;
+
+window.setDimHighlight = function(enabled) {
+    window.dimHighlightEnabled = !!enabled;
+    const btn = document.getElementById("btn-toggle-dim");
+    if (btn) {
+        btn.classList.toggle("active", window.dimHighlightEnabled);
+        btn.textContent = window.dimHighlightEnabled ? "◐ Dim Others: ON" : "○ Dim Others: OFF";
+        btn.title = window.dimHighlightEnabled ?
+            "Toggle dimming unhighlighted elements to 50% opacity (currently ON)" :
+            "Toggle dimming unhighlighted elements to 50% opacity (currently OFF)";
+    }
+    // Refresh highlight state on all visualization containers
+    const visNodes = [
+        document.getElementById("visualization"),
+        document.getElementById("visualization-callees"),
+        document.getElementById("visualization-callers")
+    ];
+    visNodes.forEach(node => {
+        if (node && typeof node.refreshHighlight === "function") {
+            node.refreshHighlight();
+        }
+    });
+    if (window.detailPanelManager && typeof window.detailPanelManager.refreshHighlight === "function") {
+        window.detailPanelManager.refreshHighlight();
+    }
+};
+
+const btnToggleDim = document.getElementById("btn-toggle-dim");
+if (btnToggleDim) {
+    btnToggleDim.addEventListener("click", () => {
+        window.setDimHighlight(!window.dimHighlightEnabled);
     });
 }
 
