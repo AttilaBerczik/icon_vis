@@ -215,6 +215,21 @@
             pointer-events: none;
         }
 
+        /* --- Degree "hats": incoming (top) / outgoing (bottom) bars on nodes --- */
+        .degree-hat {
+            fill: #94a3b8;
+            pointer-events: none;
+            transition: opacity 0.12s ease;
+        }
+
+        /* The bars are hidden whenever edges are actually visible: either the
+           "Edges" toggle is on, or the node's edges are highlighted. */
+        svg:not(.edges-off) .degree-hat,
+        svg.edges-off .node-g.node-primary-highlight .degree-hat,
+        svg.edges-off .node-g.node-connected-highlight .degree-hat {
+            opacity: 0;
+        }
+
         .graph-edge {
             cursor: crosshair;
             transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;

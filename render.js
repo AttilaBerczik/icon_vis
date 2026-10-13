@@ -961,6 +961,58 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     });
     state.edgesByNodeId = edgesByNodeId;
 
+    // --- Degree "hats": small bars on top (incoming) and bottom (outgoing) of a
+    // node in the base view. Their width grows with the number of connected
+    // edges (capped just under the node width) and they are only shown while the
+    // actual edges are hidden.
+    const showDegreeHats = !focusNodeId;
+    const HAT_MIN_WIDTH = 3;   // "stick" width for a single edge
+    const HAT_HEIGHT = 6;
+    const HAT_MAX_WIDTH_RATIO = 0.82; // a bit less than the node width
+
+    // Count distinct real neighbours, resolving the dummy nodes that multi-layer
+    // edges insert (dummy ids look like "dummy|source|target|layer").
+    function countRealNeighbors(neighborMap, id, realIndexInDummyId) {
+        const list = neighborMap.get(id) || [];
+        const unique = new Set();
+        for (const other of list) {
+            const s = String(other);
+            if (s.startsWith("dummy|")) {
+                const parts = s.split("|");
+                const real = parts[realIndexInDummyId];
+                if (real) unique.add(real);
+            } else {
+                unique.add(s);
+            }
+        }
+        return unique.size;
+    }
+
+    let maxInDegree = 1;
+    let maxOutDegree = 1;
+    const inDegreeById = new Map();
+    const outDegreeById = new Map();
+
+    if (showDegreeHats) {
+        nodeData.forEach(d => {
+            if (d.isDummy) return;
+            const outDeg = countRealNeighbors(edges, d.id, 2);
+            const inDeg = countRealNeighbors(reverseEdgesMap, d.id, 1);
+            outDegreeById.set(d.id, outDeg);
+            inDegreeById.set(d.id, inDeg);
+            if (outDeg > maxOutDegree) maxOutDegree = outDeg;
+            if (inDeg > maxInDegree) maxInDegree = inDeg;
+        });
+    }
+
+    function computeHatWidth(count, maxCount, nodeWidth) {
+        if (!count || count <= 0) return 0;
+        if (maxCount <= 1) return HAT_MIN_WIDTH;
+        const maxWidth = Math.max(HAT_MIN_WIDTH, nodeWidth * HAT_MAX_WIDTH_RATIO);
+        const t = Math.sqrt((count - 1) / (maxCount - 1)); // 0 for a single edge
+        return HAT_MIN_WIDTH + (maxWidth - HAT_MIN_WIDTH) * t;
+    }
+
     container.node().updateEdgeRouting = function() {
         const isOrthogonal = document.getElementById("toggle-orthogonal")?.checked;
         edgesGroup.selectAll("path.graph-edge").attr("d", (d) => buildPathLine(d, nodeDims, isOrthogonal));
@@ -1483,6 +1535,34 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             .attr("stroke", d => getNodeRectStroke(d))
             .attr("stroke-width", d => getNodeRectStrokeWidth(d))
             .attr("filter", d => getNodeFilter(d));
+
+        // Degree hats: incoming bar on top, outgoing bar on the bottom.
+        if (showDegreeHats) {
+            enteredNodes.each(function(d) {
+                const nodeG = d3.select(this);
+                const inW = computeHatWidth(inDegreeById.get(d.id) || 0, maxInDegree, d.width);
+                const outW = computeHatWidth(outDegreeById.get(d.id) || 0, maxOutDegree, d.width);
+
+                if (inW > 0) {
+                    nodeG.append("rect")
+                        .attr("class", "degree-hat degree-hat-in")
+                        .attr("x", d.width / 2 - inW / 2)
+                        .attr("y", -HAT_HEIGHT)
+                        .attr("width", inW)
+                        .attr("height", HAT_HEIGHT)
+                        .attr("rx", 1.5);
+                }
+                if (outW > 0) {
+                    nodeG.append("rect")
+                        .attr("class", "degree-hat degree-hat-out")
+                        .attr("x", d.width / 2 - outW / 2)
+                        .attr("y", d.height)
+                        .attr("width", outW)
+                        .attr("height", HAT_HEIGHT)
+                        .attr("rx", 1.5);
+                }
+            });
+        }
 
         enteredNodes.filter(d => isTabNode(d))
             .append("rect")
