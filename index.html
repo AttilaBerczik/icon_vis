@@ -387,65 +387,6 @@
             fill: #ffffff;
         }
 
-        /* --- Sub-graph Header --- */
-        #subgraph-header {
-            display: none;
-            align-items: center;
-            gap: 10px;
-            padding: 2px 8px;
-            background: linear-gradient(135deg, #1e293b, #0f172a);
-            color: #f1f5f9;
-            border-radius: 6px;
-            margin: 0;
-            flex-wrap: wrap;
-        }
-
-        #back-link {
-            color: #60a5fa;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 13px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }
-        #back-link:hover {
-            background: rgba(96, 165, 250, 0.15);
-            text-decoration: underline;
-        }
-
-        #subgraph-node-name {
-            font-size: 14px;
-            font-weight: 700;
-            flex-grow: 1;
-        }
-
-        #subgraph-tabs {
-            display: flex;
-            gap: 4px;
-        }
-
-        .tab-btn {
-            padding: 3px 10px;
-            border: 1px solid #475569;
-            background: transparent;
-            color: #94a3b8;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 600;
-            transition: all 0.2s;
-        }
-        .tab-btn.active {
-            background: #3b82f6;
-            color: white;
-            border-color: #3b82f6;
-        }
-        .tab-btn:hover:not(.active) {
-            background: #334155;
-            color: #e2e8f0;
-        }
-
         /* --- Shared Controls --- */
         #controls {
             margin: 0;
@@ -935,10 +876,10 @@
 <body>
     <!-- Split view container -->
     <div id="graph-split-container">
-        <!-- Left panel: Main visualization (or standalone sub-graph visualization) -->
+        <!-- Left panel: Main visualization -->
         <div id="left-panel">
             <div id="left-header-bar">
-                <!-- Main view header (hidden in sub-graph mode) -->
+                <!-- Main view header -->
                 <div id="main-header">
                     <h1>icon.f90 Call Graph</h1>
                     <div id="graph-search-container" class="graph-search-container">
@@ -950,17 +891,6 @@
                             <button type="button" id="search-btn-next" class="search-nav-btn" title="Next match (Enter)" style="display:none;">▼</button>
                             <button type="button" id="search-btn-clear" class="search-clear-btn" title="Clear search (Esc)" style="display:none;">✕</button>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Sub-graph header (hidden in main mode) -->
-                <div id="subgraph-header">
-                    <a href="index.html" id="back-link">← Main View</a>
-                    <span id="subgraph-node-name"></span>
-                    <div id="subgraph-tabs">
-                        <button id="tab-combined" class="tab-btn active">⇅ Combined</button>
-                        <button id="tab-callees" class="tab-btn">▼ Callees</button>
-                        <button id="tab-callers" class="tab-btn">▲ Callers</button>
                     </div>
                 </div>
 
@@ -981,14 +911,8 @@
                 </div>
             </div>
 
-            <!-- Combined / main visualization -->
+            <!-- Main visualization -->
             <div id="visualization" class="viz-container"></div>
-
-            <!-- Callees visualization (only used in sub-graph mode) -->
-            <div id="visualization-callees" class="viz-container" style="display:none;"></div>
-
-            <!-- Callers visualization (only used in sub-graph mode) -->
-            <div id="visualization-callers" class="viz-container" style="display:none;"></div>
         </div>
 
         <!-- Draggable resizer -->

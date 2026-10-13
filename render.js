@@ -965,7 +965,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // node in the base view. Their width grows with the number of connected
     // edges (capped just under the node width) and they are only shown while the
     // actual edges are hidden.
-    const showDegreeHats = !focusNodeId;
+    const showDegreeHats = (options && options.showDegreeHats !== undefined)
+        ? !!options.showDegreeHats
+        : !focusNodeId;
     const HAT_MIN_WIDTH = 3;   // "stick" width for a single edge
     const HAT_HEIGHT = 6;
     const HAT_MAX_WIDTH_RATIO = 0.82; // a bit less than the node width
@@ -1852,6 +1854,13 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
     let currentActiveSet = null;
     let currentPrimaryId = null;
 
+    // Full transitive closure of a node within the rendered graph: every node
+    // that can (transitively) call it, plus every node it can (transitively)
+    // call. Used for click selection, so all levels light up, not just one.
+    function fullClosure(nodeId) {
+        return getAllConnected(nodeId, edgesMap, reverseEdgesMap);
+    }
+
     const isDimEnabled = () => window.dimHighlightEnabled !== false;
 
     // True when the pointer moved from one interactive graph element to another
@@ -1954,10 +1963,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
 
     // Restore active clicked node or search state
     if (activeClickedNodeId && nodeElementsById.has(activeClickedNodeId)) {
-        const allConnected = window.getFullAllConnected ?
-            window.getFullAllConnected(activeClickedNodeId) :
-            getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
-        updateHighlightState(allConnected, activeClickedNodeId);
+        updateHighlightState(fullClosure(activeClickedNodeId), activeClickedNodeId);
     } else {
         activeClickedNodeId = null;
         if (state) state.activeClickedNodeId = null;
@@ -2011,9 +2017,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             } else {
                 activeClickedNodeId = d.id;
                 if (state) state.activeClickedNodeId = d.id;
-                const allConnected = window.getFullAllConnected ?
-                    window.getFullAllConnected(d.id) :
-                    getAllConnected(d.id, edgesMap, reverseEdgesMap);
+                const allConnected = fullClosure(d.id);
                 updateHighlightState(allConnected, d.id);
                 if (options && typeof options.onNodeClick === "function") {
                     options.onNodeClick(d.id, allConnected);
@@ -2118,10 +2122,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
 
         cNode.clearNodeHover = function() {
             if (activeClickedNodeId) {
-                const allConnected = window.getFullAllConnected ?
-                    window.getFullAllConnected(activeClickedNodeId) :
-                    getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
-                updateHighlightState(allConnected, activeClickedNodeId);
+                updateHighlightState(fullClosure(activeClickedNodeId), activeClickedNodeId);
             } else {
                 updateHighlightState(null, null);
             }
@@ -2164,11 +2165,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
 
             activeClickedNodeId = nodeId;
             if (state) state.activeClickedNodeId = nodeId;
-            const allConnected = passedActiveSet || (
-                window.getFullAllConnected ?
-                    window.getFullAllConnected(nodeId) :
-                    getAllConnected(nodeId, edgesMap, reverseEdgesMap)
-            );
+            const allConnected = passedActiveSet || fullClosure(nodeId);
             updateHighlightState(allConnected, nodeId);
         };
 
@@ -2224,10 +2221,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             }
 
             if (activeClickedNodeId) {
-                const allConnected = window.getFullAllConnected ?
-                    window.getFullAllConnected(activeClickedNodeId) :
-                    getAllConnected(activeClickedNodeId, edgesMap, reverseEdgesMap);
-                updateHighlightState(allConnected, activeClickedNodeId);
+                updateHighlightState(fullClosure(activeClickedNodeId), activeClickedNodeId);
             } else {
                 updateHighlightState(null, null);
             }

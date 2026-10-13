@@ -1,10 +1,6 @@
 const ROOT_FILE = "icon.f90";
 const ROOT_FUNCTION = "__MAIN__";
 
-// Detect sub-graph mode from URL parameter
-const urlParams = new URLSearchParams(window.location.search);
-const targetNodeId = urlParams.get("nodeId");
-
 fetch("callgraph_folders.dot")
     .then((response) => {
         if (!response.ok) {
@@ -40,13 +36,8 @@ fetch("callgraph_folders.dot")
             window.detailPanelManager.init(pristineNodes, pristineEdges);
         }
 
-        if (targetNodeId) {
-            // --- SUB-GRAPH MODE ---
-            renderSubGraphMode(targetNodeId, nodes, edges);
-        } else {
-            // --- MAIN VIEW MODE ---
-            renderMainMode(nodes, edges);
-        }
+        // --- MAIN VIEW MODE ---
+        renderMainMode(nodes, edges);
     })
     .catch((error) => {
         renderError(error.message);
@@ -105,129 +96,6 @@ function renderMainMode(nodes, edges) {
     setupSearchUI(container.node());
 }
 
-function renderSubGraphMode(nodeId, nodes, edges) {
-    // Check if node exists
-    if (!nodes.has(nodeId)) {
-        renderError("Node not found: " + nodeId);
-        return;
-    }
-
-    // Switch UI to sub-graph mode
-    document.getElementById("main-header").style.display = "none";
-    document.getElementById("subgraph-header").style.display = "flex";
-
-    // Set page title and header
-    const rawLabel = nodes.get(nodeId);
-    const labelInfo = parseNodeLabel(rawLabel);
-    const functionName = labelInfo.lines[labelInfo.lines.length - 1];
-    const fileName = labelInfo.file || "";
-    const displayName = fileName ? `${functionName} (${fileName})` : functionName;
-
-    document.title = `Call Graph: ${displayName}`;
-    document.getElementById("subgraph-node-name").textContent = displayName;
-
-    // Preserve original edges/nodes (buildLevels is destructive)
-    const origEdges = cloneEdges(edges);
-    const origNodes = cloneNodes(nodes);
-
-    // --- 1. Build Combined Graph (Default on start) ---
-    const combinedContainer = d3.select("#visualization");
-    const combinedState = createGraphState();
-    const combined = buildCombinedGraph(nodeId, origNodes, origEdges);
-
-    const subGraphModeOptions = {
-        focusNodeId: nodeId,
-        isSubGraph: true,
-        onNodeHover: (hId, activeSet) => {
-            if (window.detailPanelManager && typeof window.detailPanelManager.highlightNodeHover === "function") {
-                window.detailPanelManager.highlightNodeHover(hId, activeSet);
-            }
-        },
-        onNodeMouseOut: () => {
-            if (window.detailPanelManager && typeof window.detailPanelManager.clearNodeHover === "function") {
-                window.detailPanelManager.clearNodeHover();
-            }
-        },
-        onNodeClick: (cId, activeSet) => {
-            if (window.detailPanelManager && typeof window.detailPanelManager.selectNode === "function") {
-                window.detailPanelManager.selectNode(cId, activeSet);
-            }
-        }
-    };
-
-    if (combined.hasCallers || combined.hasCallees) {
-        renderGraph(combined.levels, combined.depthById, combined.nodes, combined.edges, combinedContainer, combinedState, subGraphModeOptions);
-    } else {
-        combinedContainer.append("div").attr("class", "empty-message").text("No callers or callees found for this function.");
-    }
-
-    // --- 2. Build Callees Graph (Lazy) ---
-    const calleeContainer = d3.select("#visualization-callees");
-    let calleeState = null;
-    let hasRenderedCallees = false;
-
-    function renderCalleesOnce() {
-        if (hasRenderedCallees) return;
-        hasRenderedCallees = true;
-        calleeState = createGraphState();
-        const calleeEdges = cloneEdges(origEdges);
-        const calleeNodes = cloneNodes(origNodes);
-        const { levels: calleeLevels, depthById: calleeDepth } = buildLevels(nodeId, calleeEdges, calleeNodes);
-
-        if (calleeLevels.length > 1) {
-            renderGraph(calleeLevels, calleeDepth, calleeNodes, calleeEdges, calleeContainer, calleeState, subGraphModeOptions);
-        } else {
-            calleeContainer.append("div").attr("class", "empty-message").text("This function does not call any other functions.");
-        }
-    }
-
-    // --- 3. Build Callers Graph (Lazy) ---
-    const callerContainer = d3.select("#visualization-callers");
-    let callerState = null;
-    let hasRenderedCallers = false;
-
-    function renderCallersOnce() {
-        if (hasRenderedCallers) return;
-        hasRenderedCallers = true;
-        callerState = createGraphState();
-        const reverseEdges = buildReverseEdgeMap(origEdges);
-        const callerNodes = cloneNodes(origNodes);
-        const { levels: rawCallerLevels, depthById: rawCallerDepth } = buildLevels(nodeId, reverseEdges, callerNodes);
-
-        if (rawCallerLevels.length > 1) {
-            const flipped = flipGraph(rawCallerLevels, rawCallerDepth, reverseEdges);
-            renderGraph(flipped.levels, flipped.depthById, callerNodes, flipped.edges, callerContainer, callerState, subGraphModeOptions);
-        } else {
-            callerContainer.append("div").attr("class", "empty-message").text("No callers found for this function.");
-        }
-    }
-
-    // --- Tab Switching ---
-    const tabCombined = document.getElementById("tab-combined");
-    const tabCallees = document.getElementById("tab-callees");
-    const tabCallers = document.getElementById("tab-callers");
-    const visCombined = document.getElementById("visualization");
-    const visCallees = document.getElementById("visualization-callees");
-    const visCallers = document.getElementById("visualization-callers");
-
-    function switchMode(mode) {
-        tabCombined?.classList.toggle("active", mode === "combined");
-        tabCallees?.classList.toggle("active", mode === "callees");
-        tabCallers?.classList.toggle("active", mode === "callers");
-
-        if (visCombined) visCombined.style.display = mode === "combined" ? "block" : "none";
-        if (visCallees) visCallees.style.display = mode === "callees" ? "block" : "none";
-        if (visCallers) visCallers.style.display = mode === "callers" ? "block" : "none";
-
-        if (mode === "callees") renderCalleesOnce();
-        if (mode === "callers") renderCallersOnce();
-    }
-
-    if (tabCombined) tabCombined.addEventListener("click", () => switchMode("combined"));
-    if (tabCallees) tabCallees.addEventListener("click", () => switchMode("callees"));
-    if (tabCallers) tabCallers.addEventListener("click", () => switchMode("callers"));
-}
-
 // --- Toggle Controls ---
 const toggleEdges = document.getElementById("toggle-edges");
 if (toggleEdges) {
@@ -260,10 +128,6 @@ if (toggleOrthogonal) {
         if (visNode && typeof visNode.updateEdgeRouting === "function") {
             visNode.updateEdgeRouting();
         }
-        const visCallers = d3.select("#visualization-callers").node();
-        if (visCallers && typeof visCallers.updateEdgeRouting === "function") {
-            visCallers.updateEdgeRouting();
-        }
         if (window.detailPanelManager) {
             window.detailPanelManager.updateEdgeRouting();
         }
@@ -283,12 +147,8 @@ window.setDimHighlight = function(enabled) {
             "Toggle dimming unhighlighted elements to 50% opacity (currently ON)" :
             "Toggle dimming unhighlighted elements to 50% opacity (currently OFF)";
     }
-    // Refresh highlight state on all visualization containers
-    const visNodes = [
-        document.getElementById("visualization"),
-        document.getElementById("visualization-callees"),
-        document.getElementById("visualization-callers")
-    ];
+    // Refresh highlight state on the main visualization container
+    const visNodes = [document.getElementById("visualization")];
     visNodes.forEach(node => {
         if (node && typeof node.refreshHighlight === "function") {
             node.refreshHighlight();
@@ -309,16 +169,7 @@ if (btnToggleDim) {
 // --- Expand / Collapse Shorthand Controls ---
 function applyContainerAction(actionName) {
     const visCombined = d3.select("#visualization").node();
-    const visCallees = d3.select("#visualization-callees").node();
-    const visCallers = d3.select("#visualization-callers").node();
-
-    const candidates = [visCombined, visCallees, visCallers].filter(
-        node => node && node.style.display !== "none" && typeof node[actionName] === "function"
-    );
-
-    if (candidates.length > 0) {
-        candidates.forEach(node => node[actionName]());
-    } else if (visCombined && typeof visCombined[actionName] === "function") {
+    if (visCombined && typeof visCombined[actionName] === "function") {
         visCombined[actionName]();
     }
 
@@ -344,12 +195,8 @@ if (btnCloseAll) {
 
 // --- Context Menu Wiring ---
 document.getElementById("ctx-open-tab").addEventListener("click", () => {
-    if (contextMenuNodeId) {
-        if (window.detailPanelManager) {
-            window.detailPanelManager.openTab(contextMenuNodeId);
-        } else {
-            window.open(`index.html?nodeId=${encodeURIComponent(contextMenuNodeId)}`, '_blank');
-        }
+    if (contextMenuNodeId && window.detailPanelManager) {
+        window.detailPanelManager.openTab(contextMenuNodeId);
     }
     document.getElementById("context-menu").style.display = "none";
 });
@@ -496,13 +343,9 @@ function setupSearchUI(visContainerNode) {
     // Global shortcut Ctrl+F / Cmd+F to focus graph search input
     document.addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
-            // Only capture if user is in main view and not in detail panel or another text input
-            const mainHeader = document.getElementById("main-header");
-            if (mainHeader && mainHeader.style.display !== "none") {
-                e.preventDefault();
-                searchInput.focus();
-                searchInput.select();
-            }
+            e.preventDefault();
+            searchInput.focus();
+            searchInput.select();
         }
     });
 }

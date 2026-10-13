@@ -434,7 +434,7 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
 
     const subGraphOptions = {
         focusNodeId: nodeId,
-        isSubGraph: true,
+        showDegreeHats: true,
         onNodeHover: (hId, activeSet) => {
             const leftViz = document.getElementById("visualization");
             if (leftViz && typeof leftViz.highlightNodeHover === "function") {
