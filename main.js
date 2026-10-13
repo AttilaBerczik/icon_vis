@@ -166,6 +166,32 @@ if (btnToggleDim) {
     });
 }
 
+// --- Edge Thickness (call frequency) Toggle Control ---
+// Edge weights come from the `weight=<call count>` attribute written by the
+// callGraph generator. When enabled, thicker edges mean the caller calls the
+// callee more times. Visible once the "Edges" toggle is on.
+window.edgeThicknessEnabled = true;
+
+window.setEdgeThickness = function(enabled) {
+    window.edgeThicknessEnabled = !!enabled;
+    const btn = document.getElementById("btn-toggle-thickness");
+    if (btn) {
+        btn.classList.toggle("active", window.edgeThicknessEnabled);
+        btn.textContent = window.edgeThicknessEnabled ? "↔ Thick Edges: ON" : "↔ Thick Edges: OFF";
+        btn.title = window.edgeThicknessEnabled
+            ? "Edge thickness reflects call frequency (currently ON). Turn the Edges toggle on to see it."
+            : "Edge thickness reflects call frequency (currently OFF).";
+    }
+    applyContainerAction("updateEdgeThickness");
+};
+
+const btnToggleThickness = document.getElementById("btn-toggle-thickness");
+if (btnToggleThickness) {
+    btnToggleThickness.addEventListener("click", () => {
+        window.setEdgeThickness(!window.edgeThicknessEnabled);
+    });
+}
+
 // --- Expand / Collapse Shorthand Controls ---
 function applyContainerAction(actionName) {
     const visCombined = d3.select("#visualization").node();

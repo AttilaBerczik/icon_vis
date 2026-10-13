@@ -338,6 +338,17 @@ class DetailPanelManager {
         });
     }
 
+    updateEdgeThickness() {
+        // Re-apply edge stroke widths on all tab visualizations
+        if (!this.contentArea) return;
+        const vizNodes = this.contentArea.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (typeof node.updateEdgeThickness === "function") {
+                node.updateEdgeThickness();
+            }
+        });
+    }
+
     expandAll() {
         this.applyActionToActiveTab("expandAll");
     }

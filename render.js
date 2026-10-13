@@ -29,6 +29,41 @@ window.globalFileColorMap = globalFileColorMap;
 window.getFolderColor = getFolderColor;
 window.getFileColor = getFileColor;
 
+// --- Edge thickness (call frequency) --------------------------------------
+// Edges carry `weight=<number of call sites>` (parsed in parser.js). When the
+// "Thick Edges" toggle is on, the base stroke width is scaled logarithmically
+// with the weight so that frequently-called links stand out.
+const EDGE_WIDTH_MIN = 1;
+const EDGE_WIDTH_MAX = 8;
+
+function isEdgeThicknessEnabled() {
+    return window.edgeThicknessEnabled !== false;
+}
+
+function getEdgeWeightForIds(fromId, toId) {
+    const map = window.globalEdgeWeightMap;
+    if (!map || fromId == null || toId == null) return 1;
+    let w = map.get(fromId + "|" + toId);
+    if (w === undefined) w = map.get(toId + "|" + fromId); // caller view is flipped
+    return (typeof w === "number" && w > 0) ? w : 1;
+}
+
+function edgeWeightForData(d) {
+    if (!d) return 1;
+    const from = d.realFromId || d.fromId;
+    const to = d.realToId || d.toId;
+    return getEdgeWeightForIds(from, to);
+}
+
+function computeEdgeStrokeWidth(d) {
+    if (!isEdgeThicknessEnabled()) return EDGE_WIDTH_MIN;
+    const w = edgeWeightForData(d);
+    const maxW = window.globalMaxEdgeWeight || 1;
+    if (w <= 1 || maxW <= 1) return EDGE_WIDTH_MIN;
+    const t = Math.log(w) / Math.log(maxW); // 0..1
+    return EDGE_WIDTH_MIN + (EDGE_WIDTH_MAX - EDGE_WIDTH_MIN) * t;
+}
+
 // State management factory — each graph instance gets its own state
 function createGraphState() {
     return {
@@ -1023,6 +1058,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         }
     };
 
+    // Re-apply stroke widths to the currently rendered edges. Called when the
+    // "Thick Edges" toggle changes. Edges created later (viewport culling) pick
+    // up the current setting automatically when they are (re)entered.
+    container.node().updateEdgeThickness = function() {
+        edgesGroup.selectAll("path.graph-edge")
+            .attr("stroke-width", (d) => computeEdgeStrokeWidth(d));
+    };
+
     container.node().expandAll = function() {
         state.collapsedFolders.clear();
         state.collapsedFiles.clear();
@@ -1579,7 +1622,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
         const enteredEdges = edgeSel.enter().append("path")
             .attr("class", "graph-edge")
-            .attr("fill", "none").attr("stroke", "#94a3b8").attr("stroke-width", 1)
+            .attr("fill", "none").attr("stroke", "#94a3b8")
+            .attr("stroke-width", d => computeEdgeStrokeWidth(d))
             .attr("d", d => buildPathLine(d, nodeDims, isOrthogonal));
 
         enteredEdges.each(function(d) {
