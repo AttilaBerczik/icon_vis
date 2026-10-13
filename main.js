@@ -232,7 +232,9 @@ function renderSubGraphMode(nodeId, nodes, edges) {
 const toggleEdges = document.getElementById("toggle-edges");
 if (toggleEdges) {
     toggleEdges.addEventListener("change", (e) => {
-        d3.selectAll(".edges").style("display", e.target.checked ? "block" : "none");
+        // When off, edges stay hidden except the highlighted edges of the
+        // hovered/clicked node. When on, every edge is shown again.
+        d3.selectAll("svg").classed("edges-off", !e.target.checked);
     });
 }
 

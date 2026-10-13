@@ -220,6 +220,19 @@
             transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
         }
 
+        /* Edges hidden by default: only the highlighted edges of the hovered/clicked
+           node are brought back into view. Applies when the "Edges" toggle is off. */
+        svg.edges-off .graph-edge {
+            opacity: 0 !important;
+            pointer-events: none;
+        }
+
+        svg.edges-off .graph-edge.edge-primary-highlight,
+        svg.edges-off .graph-edge.edge-connected-highlight {
+            opacity: 1 !important;
+            pointer-events: stroke;
+        }
+
         /* Container-level dimming (O(1) browser-native CSS opacity handling) */
         svg.has-highlight.dim-enabled .node-g {
             opacity: 0.5;
@@ -938,7 +951,7 @@
 
                 <!-- Shared controls -->
                 <div id="controls">
-                    <label><input type="checkbox" id="toggle-edges" checked> Edges</label>
+                    <label><input type="checkbox" id="toggle-edges" title="Show all edges. Off by default — hover or click a node to reveal its edges."> Edges</label>
                     <label><input type="checkbox" id="toggle-orthogonal"> Orthogonal</label>
                     <label><input type="checkbox" id="toggle-boxes" checked> File Boxes</label>
                     <label><input type="checkbox" id="toggle-folder-boxes" checked> Folder Boxes</label>

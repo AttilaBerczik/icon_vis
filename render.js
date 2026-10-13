@@ -860,8 +860,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     const edgesGroup = mainGroup.append("g").attr("class", "edges");
 
     // Apply current toggle states if controls exist
+    // Edges are hidden by default and only the highlighted edges of a hovered or
+    // clicked node reappear. Toggling "Edges" on shows every edge as before.
     const showEdges = document.getElementById("toggle-edges");
-    if (showEdges && !showEdges.checked) edgesGroup.style("display", "none");
+    svg.classed("edges-off", !!(showEdges && !showEdges.checked));
     const showBoxes = document.getElementById("toggle-boxes");
     if (showBoxes && !showBoxes.checked) fileBoxesGroup.style("display", "none");
     const showFolderBoxes = document.getElementById("toggle-folder-boxes");
