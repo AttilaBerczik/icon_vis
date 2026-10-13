@@ -18,11 +18,13 @@ fetch("callgraph_folders.dot")
         // Build global full graph edge maps for consistent highlight and dimming across all views
         const fullEdgesMap = new Map();
         const fullReverseEdgesMap = new Map();
-        for (const e of pristineEdges) {
-            if (!fullEdgesMap.has(e.from)) fullEdgesMap.set(e.from, []);
-            fullEdgesMap.get(e.from).push(e.to);
-            if (!fullReverseEdgesMap.has(e.to)) fullReverseEdgesMap.set(e.to, []);
-            fullReverseEdgesMap.get(e.to).push(e.from);
+        for (const [from, targets] of pristineEdges) {
+            if (!fullEdgesMap.has(from)) fullEdgesMap.set(from, []);
+            for (const to of targets) {
+                fullEdgesMap.get(from).push(to);
+                if (!fullReverseEdgesMap.has(to)) fullReverseEdgesMap.set(to, []);
+                fullReverseEdgesMap.get(to).push(from);
+            }
         }
         window.getFullImmediateNeighbors = function(nodeId) {
             return getImmediateNeighbors(nodeId, fullEdgesMap, fullReverseEdgesMap);
@@ -103,6 +105,9 @@ if (toggleEdges) {
         // When off, edges stay hidden except the highlighted edges of the
         // hovered/clicked node. When on, every edge is shown again.
         d3.selectAll("svg").classed("edges-off", !e.target.checked);
+        // Re-run culling so the DOM only holds the edges that are actually
+        // visible (none/only-highlighted when off, viewport-culled when on).
+        applyContainerAction("updateViewportCulling");
     });
 }
 

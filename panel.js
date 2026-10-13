@@ -225,6 +225,10 @@ class DetailPanelManager {
 
         this.notifyActiveNodeChanged(tab.nodeId);
 
+        // The tab may have been hidden while the global "Edges" toggle changed;
+        // refresh its rendered elements now that it is visible again.
+        this.updateViewportCulling();
+
         if (this.selectedNodeId) {
             this.selectNode(this.selectedNodeId, this.selectedActiveSet);
         }
@@ -345,6 +349,18 @@ class DetailPanelManager {
         vizNodes.forEach(node => {
             if (typeof node.updateEdgeThickness === "function") {
                 node.updateEdgeThickness();
+            }
+        });
+    }
+
+    updateViewportCulling() {
+        // Re-run viewport culling (and edge materialisation) on all tab
+        // visualizations, e.g. after the global "Edges" toggle changed.
+        if (!this.contentArea) return;
+        const vizNodes = this.contentArea.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (node.style.display !== "none" && typeof node.updateViewportCulling === "function") {
+                node.updateViewportCulling(true);
             }
         });
     }

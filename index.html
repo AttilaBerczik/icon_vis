@@ -200,13 +200,19 @@
         }
 
         /* --- Node & Edge Highlighting Contrast & Transitions --- */
+        /* NOTE: opacity/stroke-width/filter transitions are intentionally NOT
+           applied to the base node/edge classes. Dimming toggles the opacity of
+           *thousands* of elements at once, and animating SVG filters / stroke
+           widths forces expensive re-rasterisation every frame — that churn is
+           what made Firefox balloon in memory while hovering and panning. Colour
+           transitions are kept because they only ever run on the handful of
+           highlighted elements. */
         .node-g {
             cursor: pointer;
-            transition: opacity 0.12s ease;
         }
 
         .node-rect {
-            transition: fill 0.12s ease, stroke 0.12s ease, stroke-width 0.12s ease, filter 0.12s ease;
+            transition: fill 0.12s ease, stroke 0.12s ease, stroke-width 0.12s ease;
         }
 
         .node-text {
@@ -219,7 +225,6 @@
         .degree-hat {
             fill: #94a3b8;
             pointer-events: none;
-            transition: opacity 0.12s ease;
         }
 
         /* The bars are hidden whenever edges are actually visible: either the
@@ -232,7 +237,7 @@
 
         .graph-edge {
             cursor: crosshair;
-            transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
+            transition: stroke 0.12s ease;
         }
 
         /* Edges hidden by default: only the highlighted edges of the hovered/clicked

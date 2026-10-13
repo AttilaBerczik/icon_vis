@@ -1462,14 +1462,48 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     }, options, container, nodeElementsById, edgesByNodeId);
 
     // --- High-Performance Viewport Culling Engine (Phase 1) ---
+    // Gather every edge that touches the current highlight (hovered/clicked
+    // node's neighbourhood). Used when the global "Edges" toggle is off so we
+    // only keep the few revealed edges in the DOM instead of thousands of
+    // invisible <path> elements.
+    function collectHighlightEdges(activeSet, primaryId) {
+        if (!activeSet || activeSet.size === 0) return [];
+        const seen = new Set();
+        const out = [];
+        const addEdgesFor = (id) => {
+            if (!id) return;
+            const list = edgesByNodeId.get(id);
+            if (!list) return;
+            for (let i = 0; i < list.length; i++) {
+                const e = list[i];
+                if (!seen.has(e)) {
+                    seen.add(e);
+                    out.push(e);
+                }
+            }
+        };
+        if (primaryId) addEdgesFor(primaryId);
+        for (const id of activeSet) addEdgesFor(id);
+        return out;
+    }
+
     function updateViewportCulling(force = false) {
         const transform = state.currentZoomTransform || d3.zoomIdentity;
         const k = transform.k || 1;
         const vpW = (containerNode && containerNode.clientWidth > 0) ? containerNode.clientWidth : fallbackWidth;
         const vpH = (containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : viewportHeight;
 
-        const isSmallGraph = visibleNodeData.length <= 150;
-        const showText = isSmallGraph || (k >= 0.16);
+        const highlight = (state.getActiveHighlight && state.getActiveHighlight()) || {};
+        const curActiveSet = highlight.activeSet;
+        const curPrimaryId = highlight.primaryId;
+
+        const edgesGloballyVisible = !!(document.getElementById("toggle-edges") && document.getElementById("toggle-edges").checked);
+        // "Small graph" fast path: skip the spatial query and draw everything.
+        // Base the decision on the *total* drawable count (nodes + edges), not
+        // just nodes — otherwise the fully-collapsed overview (0 visible nodes,
+        // but thousands of edges) took this path and materialised every edge.
+        const isSmallGraph = (visibleNodeData.length + linkData.length) <= 800;
+        const showText = visibleNodeData.length <= 150 || (k >= 0.16);
 
         let culledNodes, culledEdges;
         const isOrthogonal = document.getElementById("toggle-orthogonal")?.checked;
@@ -1494,14 +1528,22 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                 culledEdges = [];
             } else {
                 culledNodes = spatialNodeIndex.query(viewMinX, viewMinY, viewMaxX, viewMaxY);
-                const rawCulledEdges = spatialEdgeIndex.query(viewMinX, viewMinY, viewMaxX, viewMaxY);
-                culledEdges = isOrthogonal ? rawCulledEdges : rawCulledEdges.filter(e => !e.isFromDummy);
+                if (edgesGloballyVisible) {
+                    const rawCulledEdges = spatialEdgeIndex.query(viewMinX, viewMinY, viewMaxX, viewMaxY);
+                    culledEdges = isOrthogonal ? rawCulledEdges : rawCulledEdges.filter(e => !e.isFromDummy);
+                } else {
+                    culledEdges = [];
+                }
             }
         }
 
-        const highlight = (state.getActiveHighlight && state.getActiveHighlight()) || {};
-        const curActiveSet = highlight.activeSet;
-        const curPrimaryId = highlight.primaryId;
+        // When the "Edges" toggle is off, the only edges worth having in the DOM
+        // are the ones belonging to the active highlight. Everything else is
+        // invisible, so keeping it around just wastes memory and style-recalc
+        // time on every hover.
+        if (!edgesGloballyVisible) {
+            culledEdges = collectHighlightEdges(curActiveSet, curPrimaryId);
+        }
 
         // --- 1. Nodes Enter / Update / Exit ---
         const nodeSel = nodesGroup.selectAll("g.node-g")
@@ -1658,6 +1700,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     container.node().updateViewportCulling = updateViewportCulling;
     state.updateViewportCulling = updateViewportCulling;
+    state.requestCulling = scheduleCulling;
 
     if (window.ResizeObserver && containerNode) {
         if (containerNode._navResizeObserver) {
@@ -1890,6 +1933,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         // If no activeSet, remove highlight classes and exit
         if (!activeSet) {
             svgEl.classed("has-highlight", false);
+            scheduleHighlightCulling();
             return;
         }
 
@@ -1952,6 +1996,18 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             } else if (isConnectedInActiveSet) {
                 el.classList.add("edge-connected-highlight");
             }
+        }
+
+        scheduleHighlightCulling();
+    }
+
+    // When the global "Edges" toggle is off, the rendered edge set depends on
+    // the current highlight, so a highlight change has to re-run the culling pass
+    // to add/remove the revealed edges. Throttled to one pass per frame.
+    function scheduleHighlightCulling() {
+        const edgesGloballyVisible = !!(document.getElementById("toggle-edges") && document.getElementById("toggle-edges").checked);
+        if (!edgesGloballyVisible && typeof state.requestCulling === "function") {
+            state.requestCulling();
         }
     }
 

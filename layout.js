@@ -1,13 +1,24 @@
+// Label parsing is called many times per node during layout/rendering. Labels
+// are immutable, so memoize the split result (keyed by the raw label string) to
+// avoid re-splitting the same strings tens of thousands of times.
+const _nodeLabelCache = new Map();
+
 function parseNodeLabel(rawLabel) {
-    const label = rawLabel ?? "";
-    const lines = String(label).split(/\\n|\n/);
+    const label = rawLabel == null ? "" : String(rawLabel);
+    const cached = _nodeLabelCache.get(label);
+    if (cached) return cached;
+
+    const lines = label.split(/\\n|\n/);
+    let result;
     if (lines.length >= 3) {
-        return { folder: lines[0], file: lines[1], lines };
+        result = { folder: lines[0], file: lines[1], lines };
+    } else if (lines.length === 2) {
+        result = { folder: "", file: lines[0], lines };
+    } else {
+        result = { folder: "", file: lines[0] || label, lines };
     }
-    if (lines.length === 2) {
-        return { folder: "", file: lines[0], lines };
-    }
-    return { folder: "", file: lines[0] || String(label), lines };
+    _nodeLabelCache.set(label, result);
+    return result;
 }
 
 function makeFileKey(folder, file) {
@@ -90,47 +101,51 @@ function longestPathAlgorithm(V, dagEdges, preds) {
     return layering;
 }
 
-function promoteNode(v, layering, preds, dagEdges) {
+function promoteNode(v, layering, preds, dagEdges, modified) {
     let dummydiff = 0;
     const vLayer = layering.get(v);
-    
+
     for (const u of (preds.get(v) || [])) {
         if (layering.get(u) === vLayer + 1) {
-            dummydiff += promoteNode(u, layering, preds, dagEdges);
+            dummydiff += promoteNode(u, layering, preds, dagEdges, modified);
         }
     }
-    
+
     layering.set(v, vLayer + 1);
-    
+    modified.push(v);
+
     const inDeg = (preds.get(v) || []).length;
     const outDeg = (dagEdges.get(v) || []).length;
     dummydiff += (-inDeg + outDeg);
-    
+
     return dummydiff;
 }
 
 function nodePromotionHeuristic(V, dagEdges, preds, layering) {
-    let layeringBackUp = new Map(layering);
+    // `layeringBackUp` always mirrors the last *accepted* layering. A promotion
+    // attempt records exactly which nodes it touched, so we only copy those back
+    // on rejection (instead of re-copying / restoring the whole map, which was
+    // O(V) per node and dominated the layout time on large graphs).
+    const layeringBackUp = new Map(layering);
     let promotions;
-    
+
     do {
         promotions = 0;
         for (const v of V) {
             const inDeg = (preds.get(v) || []).length;
             if (inDeg > 0) {
-                const diff = promoteNode(v, layering, preds, dagEdges);
+                const modified = [];
+                const diff = promoteNode(v, layering, preds, dagEdges, modified);
                 if (diff < 0) {
                     promotions++;
-                    layeringBackUp = new Map(layering);
+                    for (const id of modified) layeringBackUp.set(id, layering.get(id));
                 } else {
-                    for (const [k, val] of layeringBackUp.entries()) {
-                        layering.set(k, val);
-                    }
+                    for (const id of modified) layering.set(id, layeringBackUp.get(id));
                 }
             }
         }
     } while (promotions > 0);
-    
+
     return layering;
 }
 
@@ -327,70 +342,6 @@ function flattenFileOrder(folderOrder, fileOrderByFolder) {
     return fileOrder;
 }
 
-function fenwickAdd(bit, index, delta) {
-    for (let i = index; i < bit.length; i += i & -i) {
-        bit[i] += delta;
-    }
-}
-
-function fenwickSum(bit, index) {
-    let sum = 0;
-    for (let i = index; i > 0; i -= i & -i) {
-        sum += bit[i];
-    }
-    return sum;
-}
-
-function countCrossingsForLayer(edgesLayer, sourceIndex, targetIndex) {
-    const pairs = [];
-    for (const [from, to] of edgesLayer) {
-        const s = sourceIndex.get(from);
-        const t = targetIndex.get(to);
-        if (s === undefined || t === undefined) {
-            continue;
-        }
-        pairs.push([s, t]);
-    }
-    if (pairs.length < 2) {
-        return 0;
-    }
-    pairs.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
-    const maxIndex = targetIndex.size;
-    if (maxIndex <= 1) {
-        return 0;
-    }
-    const bit = new Array(maxIndex + 1).fill(0);
-    let inversions = 0;
-    let seen = 0;
-    for (const pair of pairs) {
-        const t = pair[1] + 1;
-        const lessOrEqual = fenwickSum(bit, t);
-        inversions += seen - lessOrEqual;
-        fenwickAdd(bit, t, 1);
-        seen += 1;
-    }
-    return inversions;
-}
-
-function countCrossings(levels, edgesByDepth, folderOrder, fileOrderByFolder, nodeOrderByFileDepth) {
-    const fileOrder = flattenFileOrder(folderOrder, fileOrderByFolder);
-    const indexByDepth = buildIndexByDepth(levels, fileOrder, nodeOrderByFileDepth);
-    let total = 0;
-    for (let depth = 0; depth < levels.length - 1; depth += 1) {
-        const edgesLayer = edgesByDepth.get(depth);
-        if (!edgesLayer || edgesLayer.length < 2) {
-            continue;
-        }
-        const sourceIndex = indexByDepth.get(depth);
-        const targetIndex = indexByDepth.get(depth + 1);
-        if (!sourceIndex || !targetIndex) {
-            continue;
-        }
-        total += countCrossingsForLayer(edgesLayer, sourceIndex, targetIndex);
-    }
-    return total;
-}
-
 function computeTotalEdgeLength(levels, edgesByDepth, folderOrder, fileOrderByFolder, nodeOrderByFileDepth) {
     const fileOrder = flattenFileOrder(folderOrder, fileOrderByFolder);
     const indexByDepth = buildIndexByDepth(levels, fileOrder, nodeOrderByFileDepth);
@@ -466,6 +417,17 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
     const initialTemp = Math.max(1, currentLength * 0.25);
     const cooling = 0.995;
 
+    // Simulated annealing is a heuristic: instead of always burning the full
+    // iteration budget (which took multiple seconds on the ICON graph and froze
+    // the tab before anything was drawn), bound it by wall-clock time. The vast
+    // majority of the improvement happens early, so the result stays close while
+    // startup becomes predictable on slower machines too.
+    const nowMs = () => (typeof performance !== "undefined" && performance.now)
+        ? performance.now()
+        : Date.now();
+    const startTime = nowMs();
+    const TIME_BUDGET_MS = 1000;
+
     const swapCandidates = [];
     for (const [file, depthMap] of nodeOrderByFileDepth.entries()) {
         for (const [depth, ids] of depthMap.entries()) {
@@ -493,6 +455,7 @@ function optimizeLayout(levels, depthById, nodes, edges, folderOrderInput, fileO
     let bestNodeOrder = cloneNodeOrder(nodeOrderByFileDepth);
 
     for (let i = 0; i < iterations; i += 1) {
+        if ((i & 31) === 0 && nowMs() - startTime > TIME_BUDGET_MS) break;
         const temperature = Math.max(0.001, initialTemp * Math.pow(cooling, i));
         const moveTypes = [];
         if (hasNodeSwap) moveTypes.push("nodeSwap");
