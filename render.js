@@ -1376,74 +1376,24 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         return d3.zoomIdentity.translate(tx, ty).scale(initialScale);
     }
 
-    // --- Floating "Back to Graph" Navigation Button ---
+    // --- Floating "Full Graph" Navigation Button (always visible, bottom-right) ---
     const backBtn = container.append("button")
         .attr("type", "button")
         .attr("class", "btn-back-to-graph")
-        .attr("title", "Navigate back to view the graph")
-        .attr("aria-label", "Navigate back to view the graph");
+        .attr("title", "View the full graph")
+        .attr("aria-label", "View the full graph");
 
-    const backBtnArrow = backBtn.append("span")
+    backBtn.append("span")
         .attr("class", "back-graph-arrow")
         .text("⌖");
 
     backBtn.append("span")
         .attr("class", "back-graph-text")
-        .text("Back to Graph");
+        .text("Full Graph");
 
-    function updateNavButton() {
-        const vpW = (containerNode && containerNode.clientWidth > 0) ? containerNode.clientWidth : fallbackWidth;
-        const vpH = (containerNode && containerNode.clientHeight > 0) ? containerNode.clientHeight : (document.getElementById("graph-split-container")?.clientHeight || window.innerHeight - 48);
-        const transform = state.currentZoomTransform || d3.zoomIdentity;
-
-        const screenLeft = transform.x + gMinX * transform.k;
-        const screenTop = transform.y + gMinY * transform.k;
-        const screenRight = transform.x + gMaxX * transform.k;
-        const screenBottom = transform.y + gMaxY * transform.k;
-
-        // Check if any part of the graph bounding box is visible in the viewport
-        const isVisible = !(
-            screenRight <= 10 ||
-            screenLeft >= vpW - 10 ||
-            screenBottom <= 10 ||
-            screenTop >= vpH - 10
-        );
-
-        if (isVisible) {
-            backBtn.classed("visible", false);
-        } else {
-            // Calculate direction from center of viewport to center of graph
-            const graphCenterX = transform.x + ((gMinX + gMaxX) / 2) * transform.k;
-            const graphCenterY = transform.y + ((gMinY + gMaxY) / 2) * transform.k;
-            const vpCenterX = vpW / 2;
-            const vpCenterY = vpH / 2;
-            const dx = graphCenterX - vpCenterX;
-            const dy = graphCenterY - vpCenterY;
-            const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-
-            let arrow = "⌖";
-            if (angle >= -22.5 && angle < 22.5) {
-                arrow = "→";
-            } else if (angle >= 22.5 && angle < 67.5) {
-                arrow = "↘";
-            } else if (angle >= 67.5 && angle < 112.5) {
-                arrow = "↓";
-            } else if (angle >= 112.5 && angle < 157.5) {
-                arrow = "↙";
-            } else if (angle >= 157.5 || angle < -157.5) {
-                arrow = "←";
-            } else if (angle >= -157.5 && angle < -112.5) {
-                arrow = "↖";
-            } else if (angle >= -112.5 && angle < -67.5) {
-                arrow = "↑";
-            } else if (angle >= -67.5 && angle < -22.5) {
-                arrow = "↗";
-            }
-
-            backBtnArrow.text(arrow);
-            backBtn.classed("visible", true);
-        }
-    }
+    // The button is permanently visible in the bottom-right corner, so there is
+    // no longer any visibility state to update on zoom or resize.
+    function updateNavButton() {}
 
     backBtn.on("click", (event) => {
         event.stopPropagation();
@@ -1671,6 +1621,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         }
         const ro = new ResizeObserver(() => {
             updateNavButton();
+            // Keep the pan boundary in sync with the current viewport size.
+            zoom.extent([[0, 0], [containerNode.clientWidth, containerNode.clientHeight]]);
             if (typeof container.node().updateViewportCulling === "function") {
                 container.node().updateViewportCulling(true);
             }
@@ -1695,6 +1647,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // --- Interaction Attachments & Zoom ---
     const zoom = d3.zoom()
         .scaleExtent([0.05, 5])
+        // Keep the user from panning the graph completely out of view: the
+        // viewport may never move past the graph's bounding box.
+        .translateExtent([[gMinX, gMinY], [gMaxX, gMaxY]])
+        .extent([[0, 0], [viewportWidth, viewportHeight]])
         .on("zoom", (event) => {
             state.currentZoomTransform = event.transform;
             mainGroup.attr("transform", event.transform);

@@ -751,7 +751,7 @@
             cursor: grabbing;
         }
 
-        /* --- Floating "Back to Graph" Navigation Button --- */
+        /* --- Floating "Full Graph" Navigation Button (always visible) --- */
         .btn-back-to-graph {
             position: absolute;
             bottom: 24px;
@@ -770,23 +770,11 @@
             font-family: inherit;
             cursor: pointer;
             box-shadow: 0 4px 16px rgba(15, 23, 42, 0.4), 0 0 12px rgba(56, 189, 248, 0.35);
-            opacity: 0;
-            pointer-events: none;
-            transform: translateY(12px) scale(0.95);
-            transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-                        transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-                        background 0.2s,
+            transition: background 0.2s,
                         box-shadow 0.2s,
                         border-color 0.2s;
             user-select: none;
             white-space: nowrap;
-        }
-
-        .btn-back-to-graph.visible {
-            opacity: 1;
-            pointer-events: auto;
-            transform: translateY(0) scale(1);
-            animation: backBtnPulse 2.4s infinite ease-in-out;
         }
 
         .btn-back-to-graph:hover {
@@ -818,15 +806,6 @@
 
         .back-graph-text {
             letter-spacing: 0.2px;
-        }
-
-        @keyframes backBtnPulse {
-            0%, 100% {
-                box-shadow: 0 4px 16px rgba(15, 23, 42, 0.4), 0 0 10px rgba(56, 189, 248, 0.3);
-            }
-            50% {
-                box-shadow: 0 4px 20px rgba(15, 23, 42, 0.5), 0 0 20px rgba(56, 189, 248, 0.6);
-            }
         }
 
         /* --- Empty state message --- */
