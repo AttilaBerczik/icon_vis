@@ -273,6 +273,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     }
 
     // 2. Compute max column widths (ignoring collapsed state initially for base metrics)
+    // A file column must be wide enough for the widest *row* it contains. Use the
+    // real node widths of that row instead of `count * widestNode`, which
+    // over-estimated the width and left dead horizontal space in the column.
     const maxNodesPerLevelByFile = new Map();
     const fileColumnWidths = new Map();
 
@@ -282,93 +285,113 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     });
 
     levels.forEach((levelIds) => {
-        const counts = new Map();
-        const maxNodeWidthInFileForLevel = new Map();
+        const rowWidthByFile = new Map();
+        const countByFile = new Map();
 
         levelIds.forEach((id) => {
             if (String(id).startsWith("dummy|")) return;
 
             const fileKey = getNodeFileKey(id, nodes);
-            counts.set(fileKey, (counts.get(fileKey) || 0) + 1);
-
             const dims = nodeDims.get(id);
-            if (dims) {
-                const currentMax = maxNodeWidthInFileForLevel.get(fileKey) || 0;
-                maxNodeWidthInFileForLevel.set(fileKey, Math.max(currentMax, dims.w));
-            }
+            const w = dims ? dims.w : NODE_MIN_WIDTH;
+
+            countByFile.set(fileKey, (countByFile.get(fileKey) || 0) + 1);
+            rowWidthByFile.set(fileKey, (rowWidthByFile.get(fileKey) || 0) + w);
         });
 
-        for (const [f, c] of counts.entries()) {
+        for (const [f, c] of countByFile.entries()) {
             maxNodesPerLevelByFile.set(f, Math.max(maxNodesPerLevelByFile.get(f) || 0, c));
-            const levelNodeWidth = maxNodeWidthInFileForLevel.get(f) || 32;
-            const totalLevelWidthNeeded = c * levelNodeWidth + (c - 1) * X_SPACING_BETWEEN_NODES;
-            fileColumnWidths.set(f, Math.max(fileColumnWidths.get(f) || 0, totalLevelWidthNeeded));
+            const rowWidth = (rowWidthByFile.get(f) || 0) + (c - 1) * X_SPACING_BETWEEN_NODES;
+            fileColumnWidths.set(f, Math.max(fileColumnWidths.get(f) || 0, rowWidth));
         }
     });
 
     // 2.5. Hierarchical Interval Graph Coloring: pack folders and files into shared column slots
-    // Compute per-file and per-folder layer sets
-    const fileLayers = new Map();
-    fileOrder.forEach(f => fileLayers.set(f, new Set()));
+    //
+    // Files (and folders) may only share a column slot when their vertical
+    // ranges are disjoint. The ranges must be treated as *continuous spans*
+    // [minDepth, maxDepth], not as sets of the discrete depths that happen to
+    // contain a node: a file with nodes at depths {2, 9} draws a bounding box
+    // that covers every row in between, so it visually collides with a file
+    // occupying depth 5 even though their depth *sets* are disjoint. Using sets
+    // here was what put overlapping boxes into the same column.
+    const fileSpan = new Map();
+    fileOrder.forEach(f => fileSpan.set(f, null));
 
     levels.forEach((levelIds, depth) => {
         levelIds.forEach(id => {
             if (String(id).startsWith("dummy|")) return;
             const fileKey = getNodeFileKey(id, nodes);
-            if (fileLayers.has(fileKey)) {
-                fileLayers.get(fileKey).add(depth);
+            if (!fileSpan.has(fileKey)) return;
+            const span = fileSpan.get(fileKey);
+            if (!span) fileSpan.set(fileKey, { min: depth, max: depth });
+            else {
+                span.min = Math.min(span.min, depth);
+                span.max = Math.max(span.max, depth);
             }
         });
     });
 
-    const folderLayers = new Map();
-    orderedFolders.forEach(folder => folderLayers.set(folder, new Set()));
+    const folderSpan = new Map();
+    orderedFolders.forEach(folder => folderSpan.set(folder, null));
 
     levels.forEach((levelIds, depth) => {
         levelIds.forEach(id => {
             if (String(id).startsWith("dummy|")) return;
             const folder = getNodeFolder(id, nodes);
-            if (folderLayers.has(folder)) {
-                folderLayers.get(folder).add(depth);
+            if (!folderSpan.has(folder)) return;
+            const span = folderSpan.get(folder);
+            if (!span) folderSpan.set(folder, { min: depth, max: depth });
+            else {
+                span.min = Math.min(span.min, depth);
+                span.max = Math.max(span.max, depth);
             }
         });
     });
 
+    // Folder boxes are padded vertically (FOLDER_BOX_PAD_TOP / _BOTTOM), so two
+    // folders may only share the same column slots when at least one empty depth
+    // row separates their spans. Without this slack their padded boxes overlap
+    // vertically even though the spans themselves are disjoint.
+    folderSpan.forEach((span, folder) => {
+        if (span) folderSpan.set(folder, { min: span.min - 1, max: span.max + 1 });
+    });
+
+    const spansOverlap = (a, b) => !!a && !!b && a.min <= b.max && b.min <= a.max;
+    // A slot keeps every span placed in it; a new item may join only when its
+    // span overlaps none of them. Keeping the individual spans (instead of one
+    // merged span) lets a narrow file drop into a genuine gap between two
+    // already-packed files.
+    const slotConflicts = (slot, span) => slot.spans.some(s => spansOverlap(s, span));
+
     const hasRealFolders = orderedFolders.some(f => f && f.length > 0);
 
-    let globalSlots = []; // array of { layers: Set, files: [] }
+    let globalSlots = []; // array of { spans: [], files: [] }
     const fileToSlot = new Map(); // fileKey -> globalSlotIndex
     const folderStartSlot = new Map(); // folder -> startSlotIndex
 
     if (!hasRealFolders) {
         // Flat file mode (e.g. callgraph.dot): pack files directly across column slots
         fileOrder.forEach(f => {
-            const layers = fileLayers.get(f) || new Set();
+            const span = fileSpan.get(f);
             let assigned = -1;
             for (let s = 0; s < globalSlots.length; s++) {
-                let overlap = false;
-                for (const d of layers) {
-                    if (globalSlots[s].layers.has(d)) {
-                        overlap = true;
-                        break;
-                    }
-                }
-                if (!overlap) {
+                if (!slotConflicts(globalSlots[s], span)) {
                     assigned = s;
                     break;
                 }
             }
             if (assigned === -1) {
                 assigned = globalSlots.length;
-                globalSlots.push({ files: [], layers: new Set() });
+                globalSlots.push({ files: [], spans: [] });
             }
             globalSlots[assigned].files.push(f);
-            for (const d of layers) globalSlots[assigned].layers.add(d);
+            if (span) globalSlots[assigned].spans.push(span);
             fileToSlot.set(f, assigned);
         });
     } else {
         // Hierarchical mode: pack files inside each folder, and pack folders across columns
-        const folderInternalSlots = new Map(); // folder -> array of { files: [], layers: Set }
+        const folderInternalSlots = new Map(); // folder -> array of { files: [], spans: [] }
 
         orderedFolders.forEach(folder => {
             const files = orderedFilesByFolder.get(folder) || [];
@@ -376,34 +399,27 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
             const isFolderCollapsed = collapsedFolders.has(folder);
             if (isFolderCollapsed) {
-                const layers = folderLayers.get(folder) || new Set();
-                folderInternalSlots.set(folder, [{ files: files.slice(), layers }]);
+                const span = folderSpan.get(folder);
+                folderInternalSlots.set(folder, [{ files: files.slice(), spans: span ? [span] : [] }]);
                 return;
             }
 
             const internalSlots = [];
             files.forEach(f => {
-                const layers = fileLayers.get(f) || new Set();
+                const span = fileSpan.get(f);
                 let assigned = -1;
                 for (let s = 0; s < internalSlots.length; s++) {
-                    let overlap = false;
-                    for (const d of layers) {
-                        if (internalSlots[s].layers.has(d)) {
-                            overlap = true;
-                            break;
-                        }
-                    }
-                    if (!overlap) {
+                    if (!slotConflicts(internalSlots[s], span)) {
                         assigned = s;
                         break;
                     }
                 }
                 if (assigned === -1) {
                     assigned = internalSlots.length;
-                    internalSlots.push({ files: [], layers: new Set() });
+                    internalSlots.push({ files: [], spans: [] });
                 }
                 internalSlots[assigned].files.push(f);
-                for (const d of layers) internalSlots[assigned].layers.add(d);
+                if (span) internalSlots[assigned].spans.push(span);
             });
             folderInternalSlots.set(folder, internalSlots);
         });
@@ -412,7 +428,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             const intSlots = folderInternalSlots.get(folder) || [];
             if (intSlots.length === 0) return;
             const K = intSlots.length;
-            const flayers = folderLayers.get(folder) || new Set();
+            const fspan = folderSpan.get(folder);
 
             // Find first starting slot where folder fits across all K consecutive columns
             let startSlot = 0;
@@ -420,22 +436,17 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                 let fits = true;
                 for (let k = 0; k < K; k++) {
                     const sIdx = startSlot + k;
-                    if (sIdx < globalSlots.length) {
-                        for (const d of flayers) {
-                            if (globalSlots[sIdx].layers.has(d)) {
-                                fits = false;
-                                break;
-                            }
-                        }
+                    if (sIdx < globalSlots.length && slotConflicts(globalSlots[sIdx], fspan)) {
+                        fits = false;
+                        break;
                     }
-                    if (!fits) break;
                 }
                 if (fits) break;
                 startSlot++;
             }
 
             while (globalSlots.length < startSlot + K) {
-                globalSlots.push({ layers: new Set(), files: [] });
+                globalSlots.push({ spans: [], files: [] });
             }
 
             folderStartSlot.set(folder, startSlot);
@@ -447,15 +458,13 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                     globalSlots[gSlot].files.push(f);
                     fileToSlot.set(f, gSlot);
                 });
-                for (const d of flayers) {
-                    globalSlots[gSlot].layers.add(d);
-                }
+                if (fspan) globalSlots[gSlot].spans.push(fspan);
             }
         });
     }
 
     if (globalSlots.length === 0) {
-        globalSlots.push({ files: [], layers: new Set() });
+        globalSlots.push({ files: [], spans: [] });
     }
 
     // Compute width of each global column slot
@@ -503,23 +512,17 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                 if (realIds.length === 0) return;
 
                 const startX = fileStartX.get(f);
-                const slotIdx = fileToSlot.get(f);
-                const slotW = (slotIdx !== undefined) ? slotWidths[slotIdx] : (fileColumnWidths.get(f) || 0);
 
                 if (isFolderCollapsed || isFileCollapsed) {
                     const colCenter = startX + COLLAPSED_WIDTH / 2;
                     realIds.forEach(id => positionsX.set(id, colCenter));
                 } else {
-                    const totalColWidth = fileColumnWidths.get(f);
-                    // Center this file's content within the (potentially wider) slot
-                    const colCenter = startX + slotW / 2;
+                    // Left-align this file's row content at the start of its
+                    // column slot. Centering it inside a (possibly wider) shared
+                    // slot made narrow files float to the right, which produced
+                    // the large, varying empty gaps on the left of boxes.
+                    let segmentStartX = startX;
 
-                    const K = realIds.length;
-                    let totalSubsegmentWidth = 0;
-                    realIds.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
-                    totalSubsegmentWidth += (K - 1) * X_SPACING_BETWEEN_NODES;
-
-                    let segmentStartX = colCenter - totalSubsegmentWidth / 2;
                     realIds.forEach((id) => {
                         const dims = nodeDims.get(id);
                         const x = segmentStartX + dims.w / 2;
@@ -656,6 +659,16 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     });
 
     // 6. Calculate Y positions
+    // The vertical gap is the single biggest source of "dead" space in the
+    // graph. Only orthogonal routing genuinely needs it: its edges fan out into
+    // horizontal lanes between two levels. Straight edges need almost nothing,
+    // and hidden edges need nothing at all. So reserve the generous lane space
+    // only while orthogonal edges are actually on screen; otherwise fall back to
+    // a tight layout that hugs the nodes.
+    const edgesVisibleForSpacing = !!(document.getElementById("toggle-edges") && document.getElementById("toggle-edges").checked);
+    const orthogonalForSpacing = !!(document.getElementById("toggle-orthogonal") && document.getElementById("toggle-orthogonal").checked);
+    const orthogonalEdgesShown = orthogonalForSpacing && edgesVisibleForSpacing;
+
     const depthY = new Array(levels.length).fill(0);
     let maxIndividualHeight = NODE_MIN_HEIGHT;
     nodeData.forEach(d => { if (d.height > maxIndividualHeight) maxIndividualHeight = d.height; });
@@ -663,9 +676,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     depthY[0] = margin.top + maxIndividualHeight / 2;
 
     for (let d = 0; d < levels.length - 1; d++) {
-        const lanes = maxLanesPerLayer[d] || 1;
-        const requiredLaneSpace = lanes * MIN_LANE_GAP;
-        const ySpacing = Math.max(DEFAULT_Y_SPACING, maxIndividualHeight + requiredLaneSpace + Y_SPACING_EXTRA);
+        let ySpacing;
+        if (orthogonalEdgesShown) {
+            const lanes = maxLanesPerLayer[d] || 1;
+            const requiredLaneSpace = lanes * MIN_LANE_GAP;
+            ySpacing = Math.max(DEFAULT_Y_SPACING, maxIndividualHeight + requiredLaneSpace + Y_SPACING_EXTRA);
+        } else {
+            ySpacing = Math.max(TIGHT_Y_SPACING, maxIndividualHeight + TIGHT_Y_SPACING_EXTRA);
+        }
         depthY[d + 1] = depthY[d] + ySpacing;
     }
 
@@ -727,41 +745,40 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     const folderBoxData = [];
     const fileBoxData = [];
 
-    orderedFolders.forEach((folder) => {
-        if (!folder) return;
-        const files = orderedFilesByFolder.get(folder) || [];
-        if (files.length === 0) return;
-        const yRange = folderY.get(folder);
-        if (yRange.minY === Infinity) return;
-
-        const isCollapsed = collapsedFolders.has(folder);
-
-        // Folder box spans all distinct slot positions its files occupy
-        let folderMinX = Infinity, folderMaxX = -Infinity;
-        files.forEach(f => {
-            const fiBox = fileY.get(f);
-            if (!fiBox || fiBox.minY === Infinity) return;
-            const sx = fileStartX.get(f);
-            if (sx === undefined) return;
-            const slotIdx = fileToSlot.get(f);
-            const sw = (slotIdx !== undefined) ? slotWidths[slotIdx] : COLLAPSED_WIDTH;
-            const fileW = isCollapsed ? COLLAPSED_WIDTH : (collapsedFiles.has(f) ? COLLAPSED_WIDTH : sw);
-            folderMinX = Math.min(folderMinX, sx);
-            folderMaxX = Math.max(folderMaxX, sx + fileW);
-        });
-        if (folderMinX === Infinity) return;
-
-        folderBoxData.push({
-            folder,
-            x: folderMinX - BOX_PADDING,
-            y: yRange.minY - FOLDER_BOX_PAD_TOP,
-            width: folderMaxX - folderMinX + 2 * BOX_PADDING,
-            height: yRange.maxY - yRange.minY + FOLDER_BOX_PAD_TOP + FOLDER_BOX_PAD_BOTTOM,
-            color: getFolderColor(folder),
-            collapsed: isCollapsed
-        });
+    // Actual horizontal extent of each file's own nodes. Boxes should hug this.
+    // A file is placed in a shared column *slot* whose width is the max of all
+    // files packed into it. Using the slot width for the box drew narrow files
+    // with large, inconsistent side margins, so measure the real content instead.
+    const fileContentX = new Map();
+    nodeData.forEach((d) => {
+        if (d.isDummy) return;
+        const x = positionsX.get(d.id);
+        if (x === undefined) return;
+        let box = fileContentX.get(d.fileKey);
+        if (!box) {
+            box = { minX: Infinity, maxX: -Infinity };
+            fileContentX.set(d.fileKey, box);
+        }
+        box.minX = Math.min(box.minX, x - d.width / 2);
+        box.maxX = Math.max(box.maxX, x + d.width / 2);
     });
 
+    // Horizontal extent to draw for a file: its real node content when known,
+    // otherwise the allocated slot (or the fixed collapsed width).
+    function fileBoxExtent(f, isCollapsed) {
+        const sx = fileStartX.get(f) || 0;
+        if (isCollapsed) return { minX: sx, maxX: sx + COLLAPSED_WIDTH };
+        const content = fileContentX.get(f);
+        if (content && content.minX !== Infinity) return content;
+        const slotIdx = fileToSlot.get(f);
+        const sw = (slotIdx !== undefined) ? slotWidths[slotIdx] : (fileColumnWidths.get(f) || 0);
+        return { minX: sx, maxX: sx + sw };
+    }
+
+    // Draw the file boxes first: each one hugs its own node content plus
+    // BOX_PADDING. The folder boxes below then wrap the union of those file
+    // boxes, so file boxes never spill outside their folder and the folder does
+    // not reserve dead space around them.
     fileOrder.forEach((f) => {
         const meta = fileMetaByKey.get(f);
         if (!meta) return;
@@ -772,11 +789,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         if (meta.folder && collapsedFolders.has(meta.folder)) return;
 
         const isCollapsed = collapsedFiles.has(f);
-        const minX = fileStartX.get(f);
-        const slotIdx = fileToSlot.get(f);
-        const slotW = (slotIdx !== undefined) ? slotWidths[slotIdx] : (fileColumnWidths.get(f) || 0);
-        const widthX = isCollapsed ? COLLAPSED_WIDTH : slotW;
-        const maxX = minX + widthX;
+        const extent = fileBoxExtent(f, isCollapsed);
+        const minX = extent.minX;
+        const maxX = extent.maxX;
         const label = meta.file ? meta.file : f;
 
         fileBoxData.push({
@@ -786,6 +801,40 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             width: maxX - minX + 2 * BOX_PADDING,
             height: yRange.maxY - yRange.minY + FILE_BOX_PAD_TOP + FILE_BOX_PAD_BOTTOM,
             color: getFileColor(f),
+            collapsed: isCollapsed
+        });
+    });
+
+    orderedFolders.forEach((folder) => {
+        if (!folder) return;
+        const files = orderedFilesByFolder.get(folder) || [];
+        if (files.length === 0) return;
+        const yRange = folderY.get(folder);
+        if (yRange.minY === Infinity) return;
+
+        const isCollapsed = collapsedFolders.has(folder);
+
+        // Folder box hugs the union of its file boxes (which are already
+        // content + BOX_PADDING). Keeping the folder at the same extent as its
+        // outermost file boxes avoids both dead space and folder boxes of
+        // neighbouring columns overlapping each other.
+        let folderMinX = Infinity, folderMaxX = -Infinity;
+        files.forEach(f => {
+            const fiBox = fileY.get(f);
+            if (!fiBox || fiBox.minY === Infinity) return;
+            const extent = fileBoxExtent(f, isCollapsed || collapsedFiles.has(f));
+            folderMinX = Math.min(folderMinX, extent.minX);
+            folderMaxX = Math.max(folderMaxX, extent.maxX);
+        });
+        if (folderMinX === Infinity) return;
+
+        folderBoxData.push({
+            folder,
+            x: folderMinX - BOX_PADDING,
+            y: yRange.minY - FOLDER_BOX_PAD_TOP,
+            width: folderMaxX - folderMinX + 2 * BOX_PADDING,
+            height: yRange.maxY - yRange.minY + FOLDER_BOX_PAD_TOP + FOLDER_BOX_PAD_BOTTOM,
+            color: getFolderColor(folder),
             collapsed: isCollapsed
         });
     });
@@ -1077,6 +1126,15 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         state.collapsedFiles.clear();
         fileOrder.forEach(file => state.collapsedFiles.add(file));
         state.needsFitToScreen = true;
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
+    };
+
+    // Re-run the layout/render pipeline with the exact current graph data and
+    // collapse/zoom state. Used when a setting that changes geometry (e.g. the
+    // orthogonal / edges toggles, which together decide how much vertical space
+    // the layout must reserve) changes. Unlike expand/collapse this does not
+    // change which nodes are visible or reset the viewport.
+    container.node().relayout = function() {
         renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
     };
 

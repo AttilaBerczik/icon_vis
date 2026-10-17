@@ -108,6 +108,13 @@ if (toggleEdges) {
         // Re-run culling so the DOM only holds the edges that are actually
         // visible (none/only-highlighted when off, viewport-culled when on).
         applyContainerAction("updateViewportCulling");
+        // The compact vertical spacing is reserved only while orthogonal edges
+        // are on screen, so toggling Edges changes the layout when orthogonal
+        // routing is active. In every other case the geometry is unchanged and
+        // we skip the (comparatively expensive) re-layout.
+        if (toggleOrthogonal && toggleOrthogonal.checked) {
+            applyContainerAction("relayout");
+        }
     });
 }
 
@@ -128,14 +135,11 @@ if (toggleFolderBoxes) {
 const toggleOrthogonal = document.getElementById("toggle-orthogonal");
 if (toggleOrthogonal) {
     toggleOrthogonal.addEventListener("change", () => {
-        // Update edge routing for all visualization containers
-        const visNode = d3.select("#visualization").node();
-        if (visNode && typeof visNode.updateEdgeRouting === "function") {
-            visNode.updateEdgeRouting();
-        }
-        if (window.detailPanelManager) {
-            window.detailPanelManager.updateEdgeRouting();
-        }
+        // Switching orthogonal routing on/off changes how much vertical space the
+        // layout must reserve between levels, so re-run the full layout (this
+        // also re-routes the edges themselves). Applies to the main view and to
+        // every rendered graph in the detail panel.
+        applyContainerAction("relayout");
     });
 }
 

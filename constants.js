@@ -39,9 +39,19 @@ const FILE_BOX_CORNER_RADIUS = 10;
 
 // --- Layout spacing ----------------------------------------------------------
 const X_SPACING_BETWEEN_NODES = 30;  // horizontal gap between nodes side by side
-const DEFAULT_Y_SPACING = 160;       // minimum vertical gap between two levels
-const Y_SPACING_EXTRA = 80;          // extra room reserved under a level for edges
+const DEFAULT_Y_SPACING = 160;       // minimum vertical gap between two levels (orthogonal routing)
+const Y_SPACING_EXTRA = 80;          // extra room reserved under a level for orthogonal edge lanes
 const MIN_LANE_GAP = 4;              // vertical space per edge lane
+
+// Tight spacing used when orthogonal edges are NOT being displayed (straight
+// edges or no edges at all). Orthogonal routing needs vertical room to fan out
+// its horizontal lanes; without it that space is just dead gaps between rows,
+// so collapse the levels down to the node height plus the vertical padding that
+// the file boxes need. Two boxes in adjacent rows must not overlap: each adds
+// FILE_BOX_PAD_TOP above and FILE_BOX_PAD_BOTTOM below its nodes, so the gap
+// between two rows has to be at least their sum.
+const TIGHT_Y_SPACING = 64;          // minimum vertical gap between two levels (tight layout)
+const TIGHT_Y_SPACING_EXTRA = FILE_BOX_PAD_TOP + FILE_BOX_PAD_BOTTOM; // room for adjacent boxes' padding
 const COLUMN_SLOT_GAP = 40;          // gap between adjacent column slots
 const COLLAPSED_WIDTH = 16;          // width of a collapsed folder/file column
 const GRAPH_MARGIN = 32;             // outer margin of the whole graph

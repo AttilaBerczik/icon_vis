@@ -342,6 +342,18 @@ class DetailPanelManager {
         });
     }
 
+    relayout() {
+        // Re-run the full layout on all tab visualizations. Needed when a toggle
+        // that affects vertical spacing (orthogonal / edges) changes.
+        if (!this.contentArea) return;
+        const vizNodes = this.contentArea.querySelectorAll(".viz-container");
+        vizNodes.forEach(node => {
+            if (typeof node.relayout === "function") {
+                node.relayout();
+            }
+        });
+    }
+
     updateEdgeThickness() {
         // Re-apply edge stroke widths on all tab visualizations
         if (!this.contentArea) return;
