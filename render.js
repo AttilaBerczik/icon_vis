@@ -32,9 +32,8 @@ window.getFileColor = getFileColor;
 // --- Edge thickness (call frequency) --------------------------------------
 // Edges carry `weight=<number of call sites>` (parsed in parser.js). When the
 // "Thick Edges" toggle is on, the base stroke width is scaled logarithmically
-// with the weight so that frequently-called links stand out.
-const EDGE_WIDTH_MIN = 1;
-const EDGE_WIDTH_MAX = 8;
+// with the weight so that frequently-called links stand out. The bounds live in
+// constants.js (EDGE_WIDTH_MIN / EDGE_WIDTH_MAX).
 
 function isEdgeThicknessEnabled() {
     return window.edgeThicknessEnabled !== false;
@@ -200,16 +199,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     container.selectAll("*").remove();
 
     const nodeData = [];
-    const basePaddingX = 16;
-    const basePaddingY = 12;
-    const charWidthEstimate = 6.5;
-    const lineHeight = 16;
-    const xSpacingBetweenNodes = 30;
-    const defaultYSpacing = 160;
-    const minLaneGap = 4;
-    const margin = focusNodeId ? { top: 24, right: 24, bottom: 24, left: 24 } : { top: 32, right: 32, bottom: 32, left: 32 };
-
-    const COLLAPSED_WIDTH = 16; // The "one wide" internal logic width
+    // All layout / appearance values live in constants.js.
+    const margin = focusNodeId
+        ? { top: FOCUS_GRAPH_MARGIN, right: FOCUS_GRAPH_MARGIN, bottom: FOCUS_GRAPH_MARGIN, left: FOCUS_GRAPH_MARGIN }
+        : { top: GRAPH_MARGIN, right: GRAPH_MARGIN, bottom: GRAPH_MARGIN, left: GRAPH_MARGIN };
 
     // 1. Process node data
     levels.forEach((levelIds, depth) => {
@@ -224,8 +217,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             });
 
             const isDummy = String(id).startsWith("dummy|");
-            const calculatedWidth = isDummy ? 0 : Math.max(32, localMaxLineLength * charWidthEstimate + basePaddingX);
-            const calculatedHeight = isDummy ? 0 : Math.max(24, lines.length * lineHeight + basePaddingY);
+            const calculatedWidth = isDummy ? 0 : Math.max(NODE_MIN_WIDTH, localMaxLineLength * NODE_CHAR_WIDTH + NODE_PADDING_X);
+            const calculatedHeight = isDummy ? 0 : Math.max(NODE_MIN_HEIGHT, lines.length * NODE_LINE_HEIGHT + NODE_PADDING_Y);
 
             nodeData.push({
                 id, depth, rawLabel, lines,
@@ -308,7 +301,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         for (const [f, c] of counts.entries()) {
             maxNodesPerLevelByFile.set(f, Math.max(maxNodesPerLevelByFile.get(f) || 0, c));
             const levelNodeWidth = maxNodeWidthInFileForLevel.get(f) || 32;
-            const totalLevelWidthNeeded = c * levelNodeWidth + (c - 1) * xSpacingBetweenNodes;
+            const totalLevelWidthNeeded = c * levelNodeWidth + (c - 1) * X_SPACING_BETWEEN_NODES;
             fileColumnWidths.set(f, Math.max(fileColumnWidths.get(f) || 0, totalLevelWidthNeeded));
         }
     });
@@ -488,10 +481,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         for (const f of globalSlots[s].files) {
             fileStartX.set(f, currentX);
         }
-        currentX += slotWidths[s] + 40;
+        currentX += slotWidths[s] + COLUMN_SLOT_GAP;
     }
 
-    const svgWidth = Math.max(900, currentX + margin.right);
+    const svgWidth = Math.max(MIN_SVG_WIDTH, currentX + margin.right);
     const positionsX = new Map();
 
     // 4. Pre-calculate strictly X positions first
@@ -524,14 +517,14 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                     const K = realIds.length;
                     let totalSubsegmentWidth = 0;
                     realIds.forEach((id) => { totalSubsegmentWidth += nodeDims.get(id).w; });
-                    totalSubsegmentWidth += (K - 1) * xSpacingBetweenNodes;
+                    totalSubsegmentWidth += (K - 1) * X_SPACING_BETWEEN_NODES;
 
                     let segmentStartX = colCenter - totalSubsegmentWidth / 2;
                     realIds.forEach((id) => {
                         const dims = nodeDims.get(id);
                         const x = segmentStartX + dims.w / 2;
                         positionsX.set(id, x);
-                        segmentStartX += dims.w + xSpacingBetweenNodes;
+                        segmentStartX += dims.w + X_SPACING_BETWEEN_NODES;
                     });
                 }
             });
@@ -664,15 +657,15 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     // 6. Calculate Y positions
     const depthY = new Array(levels.length).fill(0);
-    let maxIndividualHeight = 24;
+    let maxIndividualHeight = NODE_MIN_HEIGHT;
     nodeData.forEach(d => { if (d.height > maxIndividualHeight) maxIndividualHeight = d.height; });
 
     depthY[0] = margin.top + maxIndividualHeight / 2;
 
     for (let d = 0; d < levels.length - 1; d++) {
         const lanes = maxLanesPerLayer[d] || 1;
-        const requiredLaneSpace = lanes * minLaneGap;
-        const ySpacing = Math.max(defaultYSpacing, maxIndividualHeight + requiredLaneSpace + 80);
+        const requiredLaneSpace = lanes * MIN_LANE_GAP;
+        const ySpacing = Math.max(DEFAULT_Y_SPACING, maxIndividualHeight + requiredLaneSpace + Y_SPACING_EXTRA);
         depthY[d + 1] = depthY[d] + ySpacing;
     }
 
@@ -731,7 +724,6 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         }
     });
 
-    const boxPadding = 20;
     const folderBoxData = [];
     const fileBoxData = [];
 
@@ -761,10 +753,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
         folderBoxData.push({
             folder,
-            x: folderMinX - boxPadding,
-            y: yRange.minY - 40,
-            width: folderMaxX - folderMinX + 2 * boxPadding,
-            height: yRange.maxY - yRange.minY + 60,
+            x: folderMinX - BOX_PADDING,
+            y: yRange.minY - FOLDER_BOX_PAD_TOP,
+            width: folderMaxX - folderMinX + 2 * BOX_PADDING,
+            height: yRange.maxY - yRange.minY + FOLDER_BOX_PAD_TOP + FOLDER_BOX_PAD_BOTTOM,
             color: getFolderColor(folder),
             collapsed: isCollapsed
         });
@@ -789,10 +781,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
         fileBoxData.push({
             file: f, label,
-            x: minX - boxPadding,
-            y: yRange.minY - 20,
-            width: maxX - minX + 2 * boxPadding,
-            height: yRange.maxY - yRange.minY + 40,
+            x: minX - BOX_PADDING,
+            y: yRange.minY - FILE_BOX_PAD_TOP,
+            width: maxX - minX + 2 * BOX_PADDING,
+            height: yRange.maxY - yRange.minY + FILE_BOX_PAD_TOP + FILE_BOX_PAD_BOTTOM,
             color: getFileColor(f),
             collapsed: isCollapsed
         });
@@ -911,7 +903,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("width", d => d.width).attr("height", d => d.height)
         .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.05)
         .attr("stroke", d => d.color).attr("stroke-width", 2)
-        .attr("stroke-dasharray", "8,4").attr("rx", 12);
+        .attr("stroke-dasharray", "8,4").attr("rx", FOLDER_BOX_CORNER_RADIUS);
 
     const folderToggles = folderRects.append("g")
         .style("cursor", "pointer")
@@ -947,7 +939,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("width", d => d.width).attr("height", d => d.height)
         .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.08)
         .attr("stroke", d => d.color).attr("stroke-width", 2)
-        .attr("stroke-dasharray", "5,5").attr("rx", 10);
+        .attr("stroke-dasharray", "5,5").attr("rx", FILE_BOX_CORNER_RADIUS);
 
     const fileToggles = fileRects.append("g")
         .style("cursor", "pointer")
@@ -1003,9 +995,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     const showDegreeHats = (options && options.showDegreeHats !== undefined)
         ? !!options.showDegreeHats
         : !focusNodeId;
-    const HAT_MIN_WIDTH = 3;   // "stick" width for a single edge
-    const HAT_HEIGHT = 6;
-    const HAT_MAX_WIDTH_RATIO = 0.82; // a bit less than the node width
+    // HAT_HEIGHT / HAT_MIN_WIDTH / HAT_MAX_WIDTH_RATIO live in constants.js.
 
     // Count distinct real neighbours, resolving the dummy nodes that multi-layer
     // edges insert (dummy ids look like "dummy|source|target|layer").
@@ -1279,8 +1269,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     function appendNodeText(selection) {
         const textNodes = selection.append("text")
             .attr("class", "node-text")
-            .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * 8)
-            .attr("text-anchor", "middle").attr("font-size", "12px")
+            .attr("x", d => d.width / 2).attr("y", d => d.height / 2 - (d.lines.length - 1) * (NODE_TEXT_LINE_SPACING / 2))
+            .attr("text-anchor", "middle").attr("font-size", NODE_FONT_SIZE)
             .attr("fill", d => getNodeTextFill(d));
 
         textNodes.selectAll("tspan")
@@ -1294,7 +1284,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                 width: d.width
             })))
             .enter().append("tspan")
-            .attr("x", d => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : 16))
+            .attr("x", d => d.width / 2).attr("dy", (_, i) => (i === 0 ? 0 : NODE_TEXT_LINE_SPACING))
             .attr("font-weight", d => {
                 if (d.isActiveMatch) return "800";
                 if (d.matchType === "function" && d.isFuncLine) return "800";
@@ -1567,7 +1557,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         enteredNodes.append("rect")
             .attr("class", "node-rect")
             .attr("width", d => d.width).attr("height", d => d.height)
-            .attr("rx", 6)
+            .attr("rx", NODE_CORNER_RADIUS)
             .attr("fill", d => getNodeRectFill(d))
             .attr("stroke", d => getNodeRectStroke(d))
             .attr("stroke-width", d => getNodeRectStrokeWidth(d))
@@ -1587,7 +1577,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                         .attr("y", -HAT_HEIGHT)
                         .attr("width", inW)
                         .attr("height", HAT_HEIGHT)
-                        .attr("rx", 1.5);
+                        .attr("rx", HAT_CORNER_RADIUS);
                 }
                 if (outW > 0) {
                     nodeG.append("rect")
@@ -1596,7 +1586,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                         .attr("y", d.height)
                         .attr("width", outW)
                         .attr("height", HAT_HEIGHT)
-                        .attr("rx", 1.5);
+                        .attr("rx", HAT_CORNER_RADIUS);
                 }
             });
         }
