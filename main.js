@@ -32,6 +32,11 @@ fetch("callgraph_folders.dot")
         window.getFullAllConnected = function(nodeId) {
             return getAllConnected(nodeId, fullEdgesMap, fullReverseEdgesMap);
         };
+        // Caller/callee roles for the main view, so its node colours match the
+        // focused side-panel graph of the active tab.
+        window.getFullRoleMap = function(nodeId) {
+            return computeRoleMapFromEdges(nodeId, fullEdgesMap, fullReverseEdgesMap);
+        };
 
         if (window.DetailPanelManager) {
             window.detailPanelManager = new DetailPanelManager();

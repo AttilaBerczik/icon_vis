@@ -366,6 +366,100 @@
             font-weight: 800 !important;
         }
 
+        /* --- Caller / callee role colours -----------------------------------
+           Roles are relative to the focused node. In the side panel they are
+           derived from the level ordering (callers above, callees below). The
+           main view mirrors the active side-panel tab's roles, so the same node
+           has the same colour on both sides of the split. The classes are:
+             .node-role-caller / -callee / -both   (static roles)
+             .node-highlight-caller / -callee / -both
+                                                  (dynamic fallback roles when
+                                                   no side-panel tab is open)  */
+        .node-g.node-role-caller:not(.search-match):not(.node-active-tab) .node-rect {
+            fill: #fde9c8;
+            stroke: #d97706;
+            stroke-width: 1.5px;
+        }
+
+        .node-g.node-role-caller:not(.search-match):not(.node-active-tab) .node-text {
+            fill: #7c2d12;
+        }
+
+        .node-g.node-role-caller:not(.search-match):not(.node-active-tab) .degree-hat {
+            fill: #d97706;
+        }
+
+        .node-g.node-role-callee:not(.search-match):not(.node-active-tab) .node-rect {
+            fill: #d5f0ee;
+            stroke: #0f766e;
+            stroke-width: 1.5px;
+        }
+
+        .node-g.node-role-callee:not(.search-match):not(.node-active-tab) .node-text {
+            fill: #134e4a;
+        }
+
+        .node-g.node-role-callee:not(.search-match):not(.node-active-tab) .degree-hat {
+            fill: #0f766e;
+        }
+
+        /* A main-view node that is both upstream and downstream of the active
+           tab's node (cycles / mutual recursion) gets a neutral indigo tint. */
+        .node-g.node-role-both:not(.search-match):not(.node-active-tab) .node-rect {
+            fill: #e0e7ff;
+            stroke: #6366f1;
+            stroke-width: 1.5px;
+        }
+
+        .node-g.node-role-both:not(.search-match):not(.node-active-tab) .node-text {
+            fill: #312e81;
+        }
+
+        .node-g.node-role-both:not(.search-match):not(.node-active-tab) .degree-hat {
+            fill: #6366f1;
+        }
+
+        /* Highlighted callers (warm amber). Dark text keeps the amber readable
+           and stands apart from the dark primary node and the cool callees. */
+        svg .node-g.node-connected-highlight.node-role-caller:not(.search-match):not(.node-active-tab) .node-rect,
+        svg .node-g.node-connected-highlight.node-highlight-caller:not(.search-match):not(.node-active-tab) .node-rect {
+            fill: #f59e0b !important;
+            stroke: #b45309 !important;
+            stroke-width: 2px !important;
+        }
+
+        svg .node-g.node-connected-highlight.node-role-caller:not(.search-match):not(.node-active-tab) .node-text,
+        svg .node-g.node-connected-highlight.node-highlight-caller:not(.search-match):not(.node-active-tab) .node-text {
+            fill: #451a03 !important;
+        }
+
+        /* Highlighted callees (cool teal). */
+        svg .node-g.node-connected-highlight.node-role-callee:not(.search-match):not(.node-active-tab) .node-rect,
+        svg .node-g.node-connected-highlight.node-highlight-callee:not(.search-match):not(.node-active-tab) .node-rect {
+            fill: #0d9488 !important;
+            stroke: #115e59 !important;
+            stroke-width: 2px !important;
+        }
+
+        svg .node-g.node-connected-highlight.node-role-callee:not(.search-match):not(.node-active-tab) .node-text,
+        svg .node-g.node-connected-highlight.node-highlight-callee:not(.search-match):not(.node-active-tab) .node-text {
+            fill: #ffffff !important;
+        }
+
+        /* A node that is both upstream and downstream of the focused node
+           (cycles / mutual recursion) gets a neutral slate tone. */
+        svg .node-g.node-connected-highlight.node-role-both:not(.search-match):not(.node-active-tab) .node-rect,
+        svg .node-g.node-connected-highlight.node-highlight-both:not(.search-match):not(.node-active-tab) .node-rect {
+            fill: #64748b !important;
+            stroke: #475569 !important;
+            stroke-width: 2px !important;
+        }
+
+        svg .node-g.node-connected-highlight.node-role-both:not(.search-match):not(.node-active-tab) .node-text,
+        svg .node-g.node-connected-highlight.node-highlight-both:not(.search-match):not(.node-active-tab) .node-text {
+            fill: #ffffff !important;
+        }
+
         /* Edge highlighting */
         svg .graph-edge.edge-primary-highlight {
             opacity: 1 !important;

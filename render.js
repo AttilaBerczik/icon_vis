@@ -82,7 +82,48 @@ function createGraphState() {
         activeClickedNodeId: null,
         pendingHoverNodeId: null,
         pendingHoverActiveSet: null,
+        // Main-view caller/callee roles anchored to the active side-panel tab.
+        roleAnchorId: null,
+        roleMap: null,
     };
+}
+
+// Classify every node reachable from `anchorId` as a caller (reachable
+// backwards), a callee (reachable forwards), or both. Used by the main view so
+// its node colours match the focused side-panel graph for the active tab.
+function computeRoleMapFromEdges(anchorId, edges, reverseEdges) {
+    const roles = new Map();
+    if (!anchorId || !edges) return roles;
+
+    const forward = new Set();
+    const backward = new Set();
+
+    const walk = (nextMap, out) => {
+        const seen = new Set([anchorId]);
+        const stack = [anchorId];
+        while (stack.length) {
+            const current = stack.pop();
+            const nexts = nextMap.get(current);
+            if (!nexts) continue;
+            for (const next of nexts) {
+                if (seen.has(next)) continue;
+                seen.add(next);
+                if (!String(next).startsWith("dummy|")) out.add(next);
+                stack.push(next);
+            }
+        }
+    };
+
+    walk(edges, forward);
+    walk(reverseEdges || buildReverseEdges(edges), backward);
+
+    const all = new Set([...forward, ...backward]);
+    for (const id of all) {
+        const isCallee = forward.has(id);
+        const isCaller = backward.has(id);
+        roles.set(id, isCallee && isCaller ? "both" : (isCallee ? "callee" : "caller"));
+    }
+    return roles;
 }
 
 // --- Spatial Index for Viewport Culling (Phase 1) ---
@@ -1312,8 +1353,52 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         }
         if (isTabNode(d)) return "#ffffff";
         if (isRootNode(d)) return "#f8fafc";
+        // Role text colours are inlined only for focused sub-graphs, where the
+        // role can never change. The main view gets its role colours from the
+        // CSS classes so closing the side panel cleanly restores neutral text.
+        if (focusNodeId) {
+            const role = getNodeRole(d);
+            if (role === "caller") return "#7c2d12";
+            if (role === "callee") return "#134e4a";
+            if (role === "both") return "#312e81";
+        }
         return "#1f2937";
     };
+
+    // In a focused sub-graph (the side panel's Callees/Callers/Combined views)
+    // every node is either above the focus node (= a caller) or below it
+    // (= a callee). The depth ordering built by buildCombinedGraph()/flipGraph()
+    // guarantees this, so the role can be read straight from the depth.
+    //
+    // The main view has no focus node of its own, but while a side-panel tab is
+    // open it mirrors that tab's roles: this is what keeps the same node the
+    // same colour on the left and on the right.
+    const focusNodeData = focusNodeId ? nodeData.find(d => d.id === focusNodeId) : null;
+    const focusDepth = focusNodeData ? focusNodeData.depth : null;
+
+    const staticRoleAnchorId = (!focusNodeId && state.activeTabNodeId) ? state.activeTabNodeId : null;
+    if (staticRoleAnchorId) {
+        if (state.roleAnchorId !== staticRoleAnchorId || !state.roleMap) {
+            state.roleAnchorId = staticRoleAnchorId;
+            state.roleMap = (typeof window.getFullRoleMap === "function")
+                ? window.getFullRoleMap(staticRoleAnchorId)
+                : computeRoleMapFromEdges(staticRoleAnchorId, edges, buildReverseEdges(edges));
+        }
+    } else if (state.roleMap || state.roleAnchorId) {
+        state.roleAnchorId = null;
+        state.roleMap = null;
+    }
+
+    function getNodeRole(d) {
+        if (d.isDummy) return null;
+        if (focusNodeId) {
+            if (focusDepth === null || d.id === focusNodeId) return null;
+            if (d.depth < focusDepth) return "caller";
+            if (d.depth > focusDepth) return "callee";
+            return null;
+        }
+        return (state.roleMap && state.roleMap.get(d.id)) || null;
+    }
 
     const getNodeClass = (d) => {
         const mt = getNodeMatchType(d);
@@ -1323,6 +1408,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (d.id === activeMatchId) cls += " search-match-active";
         }
         if (isTabNode(d)) cls += " node-active-tab";
+        const role = getNodeRole(d);
+        if (role) cls += ` node-role-${role}`;
         return cls;
     };
 
@@ -1546,6 +1633,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         const highlight = (state.getActiveHighlight && state.getActiveHighlight()) || {};
         const curActiveSet = highlight.activeSet;
         const curPrimaryId = highlight.primaryId;
+        const curRoles = highlight.roles;
 
         const edgesGloballyVisible = !!(document.getElementById("toggle-edges") && document.getElementById("toggle-edges").checked);
         // "Small graph" fast path: skip the spatial query and draw everything.
@@ -1689,6 +1777,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                     this.classList.add("node-primary-highlight");
                 } else {
                     this.classList.add("node-connected-highlight");
+                    const role = curRoles && curRoles.get(d.id);
+                    if (role) this.classList.add(`node-highlight-${role}`);
                 }
             }
         });
@@ -1946,12 +2036,58 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
     let activeClickedNodeId = (state && state.activeClickedNodeId) || null;
     let currentActiveSet = null;
     let currentPrimaryId = null;
+    // Map nodeId -> "caller" | "callee" | "both" for the current highlight.
+    // Only used by the main view: focused side-panel graphs know every node's
+    // role statically from its depth (see getNodeRole in renderGraph).
+    let currentHighlightRoles = null;
 
     // Full transitive closure of a node within the rendered graph: every node
     // that can (transitively) call it, plus every node it can (transitively)
     // call. Used for click selection, so all levels light up, not just one.
     function fullClosure(nodeId) {
         return getAllConnected(nodeId, edgesMap, reverseEdgesMap);
+    }
+
+    // Classify the highlighted neighbourhood of `primaryId` into callers
+    // (reachable backwards) and callees (reachable forwards). The traversal is
+    // bounded to the highlighted set, so the cheap immediate-neighbour hover
+    // does not walk the whole graph. Dummy routing nodes are still traversed.
+    function computeHighlightRoles(activeSet, primaryId) {
+        const roles = new Map();
+        if (!activeSet || !primaryId || !activeSet.size) return roles;
+
+        const highlighted = new Set(activeSet);
+        highlighted.add(primaryId);
+        const bitById = new Map();
+
+        const walk = (nextMap, bit) => {
+            const seen = new Set([primaryId]);
+            const stack = [primaryId];
+            while (stack.length) {
+                const current = stack.pop();
+                const nexts = nextMap.get(current);
+                if (!nexts) continue;
+                for (const next of nexts) {
+                    if (seen.has(next)) continue;
+                    seen.add(next);
+                    if (String(next).startsWith("dummy|")) {
+                        stack.push(next);
+                        continue;
+                    }
+                    if (!highlighted.has(next)) continue;
+                    stack.push(next);
+                    bitById.set(next, (bitById.get(next) || 0) | bit);
+                }
+            }
+        };
+
+        walk(edgesMap, 1);        // forward = callees
+        walk(reverseEdgesMap, 2); // backward = callers
+
+        for (const [id, bits] of bitById) {
+            roles.set(id, bits === 3 ? "both" : (bits === 1 ? "callee" : "caller"));
+        }
+        return roles;
     }
 
     const isDimEnabled = () => window.dimHighlightEnabled !== false;
@@ -2066,12 +2202,25 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         if (currentActiveSet) {
             nodesGroup.selectAll(".node-primary-highlight").classed("node-primary-highlight", false);
             nodesGroup.selectAll(".node-connected-highlight").classed("node-connected-highlight", false);
+            nodesGroup.selectAll(".node-highlight-caller").classed("node-highlight-caller", false);
+            nodesGroup.selectAll(".node-highlight-callee").classed("node-highlight-callee", false);
+            nodesGroup.selectAll(".node-highlight-both").classed("node-highlight-both", false);
             edgesGroup.selectAll(".edge-primary-highlight").classed("edge-primary-highlight", false);
             edgesGroup.selectAll(".edge-connected-highlight").classed("edge-connected-highlight", false);
         }
 
         currentActiveSet = activeSet;
         currentPrimaryId = primaryId;
+        // Focused side-panel graphs use the static depth-based role classes, and
+        // the main view uses the static roles of the active side-panel tab.
+        // In both cases the caller/callee hue stays anchored to the focused
+        // node instead of flipping to whatever node happens to be hovered.
+        // Only a main view with no open side tab falls back to classifying the
+        // hovered/selected node's neighbourhood dynamically.
+        const hasStaticRoles = !!(state && (state.focusNodeId || state.roleMap));
+        currentHighlightRoles = (!hasStaticRoles && activeSet && primaryId)
+            ? computeHighlightRoles(activeSet, primaryId)
+            : null;
 
         // If no activeSet, remove highlight classes and exit
         if (!activeSet) {
@@ -2102,6 +2251,8 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                 const nodeObj = nodeElementsById.get(nodeId);
                 if (nodeObj && nodeObj.el) {
                     nodeObj.el.classList.add("node-connected-highlight");
+                    const role = currentHighlightRoles && currentHighlightRoles.get(nodeId);
+                    if (role) nodeObj.el.classList.add(`node-highlight-${role}`);
                 }
             }
         }
@@ -2156,7 +2307,8 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
 
     state.getActiveHighlight = () => ({
         activeSet: currentActiveSet,
-        primaryId: currentPrimaryId
+        primaryId: currentPrimaryId,
+        roles: currentHighlightRoles
     });
     state.updateHighlightState = updateHighlightState;
 
@@ -2433,6 +2585,23 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                 });
                 return;
             }
+
+            // Keep the main view's caller/callee colours in sync with the
+            // active side-panel tab. Roles are anchored to that tab's node, so
+            // the same node has the same colour on both sides of the split.
+            const roleMap = nodeId
+                ? ((typeof window.getFullRoleMap === "function")
+                    ? window.getFullRoleMap(nodeId)
+                    : computeRoleMapFromEdges(nodeId, edgesMap, reverseEdgesMap))
+                : null;
+            state.roleAnchorId = nodeId || null;
+            state.roleMap = roleMap;
+            nodesGroup.selectAll("g.node-g").each(function(d) {
+                const role = (d && !d.isDummy && roleMap && roleMap.get(d.id)) || null;
+                this.classList.toggle("node-role-caller", role === "caller");
+                this.classList.toggle("node-role-callee", role === "callee");
+                this.classList.toggle("node-role-both", role === "both");
+            });
 
             // Update tab highlight ring in-place
             if (nodesGroup) {
