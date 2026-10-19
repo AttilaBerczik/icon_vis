@@ -80,6 +80,8 @@ function createGraphState() {
         currentZoomBehavior: null,
         viewportDims: null,
         activeClickedNodeId: null,
+        pendingHoverNodeId: null,
+        pendingHoverActiveSet: null,
     };
 }
 
@@ -1963,6 +1965,99 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         return !!(relatedTarget && relatedTarget.closest && relatedTarget.closest(".node-g, .graph-edge"));
     }
 
+    // A hovered node reveals the edges to/from its immediate neighbours. If a
+    // neighbour lives in a collapsed folder or file, that edge would otherwise
+    // end on a closed box instead of on a node. Open exactly those containers
+    // (the ones the highlighted edges lead to) so the edge target is visible.
+    // Returns true when the collapse state changed and a re-render is needed.
+    function expandBoxesForHighlight(activeSet, primaryId) {
+        if (!activeSet || !state || !state.currentGraphData || !state.currentGraphData.nodes) return false;
+        const nodes = state.currentGraphData.nodes;
+        let changed = false;
+
+        for (const nodeId of activeSet) {
+            if (!nodeId || nodeId === primaryId || String(nodeId).startsWith("dummy|")) continue;
+            const rawLabel = nodes.get(nodeId);
+            if (!rawLabel) continue;
+
+            const info = parseNodeLabel(rawLabel);
+            if (info.folder && state.collapsedFolders.has(info.folder)) {
+                state.collapsedFolders.delete(info.folder);
+                changed = true;
+            }
+            const fileKey = makeFileKey(info.folder, info.file);
+            if (fileKey && state.collapsedFiles.has(fileKey)) {
+                state.collapsedFiles.delete(fileKey);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    // Re-render after a hover-driven expansion while keeping the hovered node
+    // highlighted. The DOM is replaced, so the regular mouseover/mouseout pair
+    // will not fire for the old element; a one-shot mousemove guard clears the
+    // restored highlight as soon as the pointer leaves the new element.
+    function renderForHoverExpansion(primaryId, activeSet) {
+        // Remember where the hovered node currently sits on screen. Opening
+        // boxes re-flows the layout, which would otherwise move the node (and
+        // the node under the pointer) far away. Compensate the camera after the
+        // re-render so the node stays pinned to exactly the same screen spot.
+        const oldPos = state.nodePositions && state.nodePositions.get(primaryId);
+        const oldTransform = state.currentZoomTransform || d3.zoomIdentity;
+        const screenX = oldPos ? oldPos.x * oldTransform.k + oldTransform.x : null;
+        const screenY = oldPos ? oldPos.y * oldTransform.k + oldTransform.y : null;
+
+        state.pendingHoverNodeId = primaryId;
+        state.pendingHoverActiveSet = activeSet;
+        // Do not re-run search-focus camera moves from the options that were
+        // used for the previous render; the hover anchor is applied instead.
+        const { focusSearchNodeId, animateToNode, ...renderOptions } = options || {};
+        renderGraph(
+            state.currentGraphData.levels,
+            state.currentGraphData.depthById,
+            state.currentGraphData.nodes,
+            state.currentGraphData.edges,
+            container,
+            state,
+            { ...renderOptions, collapseAllOnInit: false }
+        );
+
+        const newPos = state.nodePositions && state.nodePositions.get(primaryId);
+        if (screenX === null || !newPos || !state.currentZoomBehavior) return;
+
+        const k = (state.currentZoomTransform || d3.zoomIdentity).k;
+        const anchoredTransform = d3.zoomIdentity
+            .translate(screenX - newPos.x * k, screenY - newPos.y * k)
+            .scale(k);
+
+        const svg = container.select("svg");
+        if (svg.empty()) return;
+        svg.call(state.currentZoomBehavior.transform, anchoredTransform);
+        // The camera moved in world space, so re-run culling for the new view.
+        if (typeof container.node().updateViewportCulling === "function") {
+            container.node().updateViewportCulling(true);
+        }
+    }
+
+    function installHoverClearGuard() {
+        const svgNode = svgEl.node();
+        if (!svgNode) return;
+        const guard = function(event) {
+            svgNode.removeEventListener("mousemove", guard, true);
+            const target = event.target;
+            const insideInteractive = target && target.closest && (target.closest(".node-g") || target.closest(".graph-edge"));
+            if (!insideInteractive) {
+                updateHighlightState(null, null);
+                if (options && typeof options.onNodeMouseOut === "function") {
+                    options.onNodeMouseOut();
+                }
+            }
+        };
+        svgNode.addEventListener("mousemove", guard, true);
+    }
+
     function updateHighlightState(activeSet, primaryId) {
         // 1. Clear the previous highlight directly in the DOM. Querying the
         //    visible selection avoids retaining references to elements that the
@@ -2071,7 +2166,23 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
     } else {
         activeClickedNodeId = null;
         if (state) state.activeClickedNodeId = null;
-        updateHighlightState(null, null);
+
+        // A hover-driven expansion re-rendered the graph. Node/edge DOM is
+        // created later by the culling pass, but setting the highlight now
+        // makes that pass give the hovered node and its edges their classes.
+        const pendingId = state && state.pendingHoverNodeId;
+        const pendingSet = state && state.pendingHoverActiveSet;
+        if (state) {
+            state.pendingHoverNodeId = null;
+            state.pendingHoverActiveSet = null;
+        }
+
+        if (pendingId && pendingSet) {
+            updateHighlightState(pendingSet, pendingId);
+            installHoverClearGuard();
+        } else {
+            updateHighlightState(null, null);
+        }
     }
 
     // --- High-Performance Event Delegation on Nodes Group ---
@@ -2088,6 +2199,17 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             const immediateNeighbors = window.getFullImmediateNeighbors ?
                 window.getFullImmediateNeighbors(d.id) :
                 getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
+
+            // Open the containers the highlighted edges lead into before
+            // drawing the highlight, so no revealed edge ends at a closed box.
+            if (expandBoxesForHighlight(immediateNeighbors, d.id)) {
+                renderForHoverExpansion(d.id, immediateNeighbors);
+                if (options && typeof options.onNodeHover === "function") {
+                    options.onNodeHover(d.id, immediateNeighbors);
+                }
+                return;
+            }
+
             updateHighlightState(immediateNeighbors, d.id);
             if (options && typeof options.onNodeHover === "function") {
                 options.onNodeHover(d.id, immediateNeighbors);
@@ -2174,6 +2296,16 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                     activeSet.add(targetId);
                 }
             });
+
+            // Same as node hover: make sure the highlighted edges can actually
+            // land on nodes instead of closed folder/file boxes.
+            if (expandBoxesForHighlight(activeSet, origin)) {
+                renderForHoverExpansion(origin, activeSet);
+                if (options && typeof options.onNodeHover === "function") {
+                    options.onNodeHover(origin, activeSet);
+                }
+                return;
+            }
 
             updateHighlightState(activeSet, origin);
             if (options && typeof options.onNodeHover === "function") {
