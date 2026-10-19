@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Call Graph Visualization</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -184,10 +189,12 @@
                 stroke-opacity: 0.95;
                 stroke-width: 2.5px;
             }
+
             50% {
                 stroke-opacity: 0.35;
                 stroke-width: 5px;
             }
+
             100% {
                 stroke-opacity: 0.95;
                 stroke-width: 2.5px;
@@ -480,33 +487,40 @@
             stroke-width: 3.5px !important;
             filter: url(#glow-active) !important;
         }
+
         .node-g.search-match-active .node-text {
             fill: #ffffff !important;
         }
+
         .node-g.search-match-function .node-rect {
             fill: #f59e0b;
             stroke: #b45309;
             stroke-width: 2.5px;
             filter: url(#glow-amber);
         }
+
         .node-g.search-match-function .node-text {
             fill: #0f172a;
         }
+
         .node-g.search-match-file .node-rect {
             fill: #8b5cf6;
             stroke: #5b21b6;
             stroke-width: 2.5px;
             filter: url(#glow-amber);
         }
+
         .node-g.search-match-file .node-text {
             fill: #ffffff;
         }
+
         .node-g.search-match-folder .node-rect {
             fill: #06b6d4;
             stroke: #0e7490;
             stroke-width: 2.5px;
             filter: url(#glow-amber);
         }
+
         .node-g.search-match-folder .node-text {
             fill: #ffffff;
         }
@@ -521,6 +535,7 @@
             gap: 10px;
             flex-wrap: wrap;
         }
+
         #controls label {
             margin-right: 0;
             cursor: pointer;
@@ -567,19 +582,6 @@
             transform: scale(0.97);
         }
 
-        .control-btn.toggle-btn.active {
-            background: #2563eb;
-            color: #ffffff;
-            border-color: #1d4ed8;
-            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
-        }
-
-        .control-btn.toggle-btn.active:hover {
-            background: #1d4ed8;
-            color: #ffffff;
-            border-color: #1e40af;
-        }
-
         /* --- Visualization Containers --- */
         #graph-split-container {
             display: flex;
@@ -615,9 +617,12 @@
             position: relative;
             border-radius: 3px;
         }
-        .panel-resizer:hover, body.resizing .panel-resizer {
+
+        .panel-resizer:hover,
+        body.resizing .panel-resizer {
             background: #3b82f6;
         }
+
         .panel-resizer::after {
             content: "";
             position: absolute;
@@ -629,9 +634,12 @@
             background: #94a3b8;
             border-radius: 1px;
         }
-        .panel-resizer:hover::after, body.resizing .panel-resizer::after {
+
+        .panel-resizer:hover::after,
+        body.resizing .panel-resizer::after {
             background: #ffffff;
         }
+
         body.resizing {
             cursor: col-resize !important;
             user-select: none !important;
@@ -674,9 +682,11 @@
             margin-right: 8px;
             padding-bottom: 1px;
         }
+
         .detail-tab-bar::-webkit-scrollbar {
             height: 4px;
         }
+
         .detail-tab-bar::-webkit-scrollbar-thumb {
             background: #475569;
             border-radius: 2px;
@@ -699,10 +709,12 @@
             max-width: 220px;
             border: 1px solid transparent;
         }
+
         .detail-tab:hover {
             background: #475569;
             color: #f8fafc;
         }
+
         .detail-tab.active {
             background: #0f172a;
             color: #34d399;
@@ -729,6 +741,7 @@
             cursor: pointer;
             transition: all 0.15s;
         }
+
         .detail-tab-close:hover {
             background: rgba(239, 68, 68, 0.25);
             color: #ef4444;
@@ -747,24 +760,48 @@
             align-items: center;
             justify-content: center;
         }
+
         .panel-close-btn:hover {
             background: rgba(239, 68, 68, 0.2);
             color: #ef4444;
         }
 
         @keyframes tabPulse {
-            0% { transform: scale(1); background-color: #10b981; color: #fff; }
-            50% { transform: scale(1.08); background-color: #059669; color: #fff; }
-            100% { transform: scale(1); }
+            0% {
+                transform: scale(1);
+                background-color: #10b981;
+                color: #fff;
+            }
+
+            50% {
+                transform: scale(1.08);
+                background-color: #059669;
+                color: #fff;
+            }
+
+            100% {
+                transform: scale(1);
+            }
         }
+
         .tab-highlight-pulse {
             animation: tabPulse 0.5s ease-out;
         }
 
         @keyframes emeraldRingPulse {
-            0%, 100% { stroke-opacity: 0.9; stroke-width: 2px; }
-            50% { stroke-opacity: 0.45; stroke-width: 2.8px; }
+
+            0%,
+            100% {
+                stroke-opacity: 0.9;
+                stroke-width: 2px;
+            }
+
+            50% {
+                stroke-opacity: 0.45;
+                stroke-width: 2.8px;
+            }
         }
+
         .active-tab-ring {
             animation: emeraldRingPulse 2s ease-in-out infinite;
         }
@@ -808,6 +845,7 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+
         .tab-sub-title::before {
             content: "";
             display: inline-block;
@@ -836,11 +874,13 @@
             font-weight: 600;
             transition: all 0.15s;
         }
+
         .tab-sub-btn.active {
             background: #3b82f6;
             color: white;
             border-color: #3b82f6;
         }
+
         .tab-sub-btn:hover:not(.active) {
             background: #e2e8f0;
             color: #1e293b;
@@ -867,10 +907,12 @@
             cursor: grab;
             position: relative;
         }
+
         .viz-container.tab-viz {
             border: none;
             border-radius: 0;
         }
+
         .viz-container:active {
             cursor: grabbing;
         }
@@ -895,8 +937,8 @@
             cursor: pointer;
             box-shadow: 0 4px 16px rgba(15, 23, 42, 0.4), 0 0 12px rgba(56, 189, 248, 0.35);
             transition: background 0.2s,
-                        box-shadow 0.2s,
-                        border-color 0.2s;
+                box-shadow 0.2s,
+                border-color 0.2s;
             user-select: none;
             white-space: nowrap;
         }
@@ -961,21 +1003,155 @@
         }
 
         @keyframes ctxFadeIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
 
-        #ctx-open-tab {
+        .ctx-item {
             padding: 8px 16px;
             cursor: pointer;
             transition: background 0.15s;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 460px;
         }
-        #ctx-open-tab:hover {
+
+        .ctx-item:hover {
             background: #334155;
+        }
+
+        /* --- Info Button & Mini Docs Popup --- */
+        .info-btn {
+            width: 26px;
+            height: 26px;
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            border: 1px solid #cbd5e1;
+            background: #f1f5f9;
+            color: #334155;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 15px;
+            font-style: italic;
+            font-weight: 700;
+            line-height: 1;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .info-btn:hover {
+            background: #2563eb;
+            border-color: #1d4ed8;
+            color: #ffffff;
+        }
+
+        .info-btn:active {
+            transform: scale(0.94);
+        }
+
+        #info-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(15, 23, 42, 0.35);
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        #info-overlay.open {
+            display: flex;
+        }
+
+        #info-popup {
+            position: relative;
+            width: 100%;
+            max-width: 470px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+            padding: 18px 22px 16px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            animation: infoFadeIn 0.15s ease-out;
+        }
+
+        @keyframes infoFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(6px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        #info-popup h2 {
+            margin: 0 30px 12px 0;
+            color: #1e293b;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        #info-popup ul {
+            margin: 0;
+            padding-left: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            color: #475569;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        #info-popup strong {
+            color: #1e293b;
+        }
+
+        #info-popup .info-footnote {
+            margin: 14px 0 0;
+            color: #94a3b8;
+            font-size: 11.5px;
+        }
+
+        #info-popup-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: #64748b;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        #info-popup-close:hover {
+            background: #fee2e2;
+            color: #dc2626;
         }
     </style>
 </head>
+
 <body>
     <!-- Split view container -->
     <div id="graph-split-container">
@@ -988,29 +1164,40 @@
                     <div id="graph-search-container" class="graph-search-container">
                         <div class="search-input-wrapper">
                             <span class="search-icon">🔍</span>
-                            <input type="text" id="graph-search-input" placeholder="Search function, file, folder... (Ctrl+F)" autocomplete="off" spellcheck="false">
+                            <input type="text" id="graph-search-input"
+                                placeholder="Search function, file, folder... (Ctrl+F)" autocomplete="off"
+                                spellcheck="false">
                             <span id="search-match-count" class="search-match-count" style="display:none;"></span>
-                            <button type="button" id="search-btn-prev" class="search-nav-btn" title="Previous match (Shift+Enter)" style="display:none;">▲</button>
-                            <button type="button" id="search-btn-next" class="search-nav-btn" title="Next match (Enter)" style="display:none;">▼</button>
-                            <button type="button" id="search-btn-clear" class="search-clear-btn" title="Clear search (Esc)" style="display:none;">✕</button>
+                            <button type="button" id="search-btn-prev" class="search-nav-btn"
+                                title="Previous match (Shift+Enter)" style="display:none;">▲</button>
+                            <button type="button" id="search-btn-next" class="search-nav-btn" title="Next match (Enter)"
+                                style="display:none;">▼</button>
+                            <button type="button" id="search-btn-clear" class="search-clear-btn"
+                                title="Clear search (Esc)" style="display:none;">✕</button>
                         </div>
                     </div>
+                    <button type="button" id="info-btn" class="info-btn" title="How to use this graph"
+                        aria-label="How to use this graph">i</button>
                 </div>
 
                 <!-- Shared controls -->
                 <div id="controls">
-                    <label><input type="checkbox" id="toggle-edges" title="Show all edges. Off by default — hover or click a node to reveal its edges."> Edges</label>
+                    <label><input type="checkbox" id="toggle-edges"
+                            title="Show all edges. Off by default — hover or click a node to reveal its edges.">
+                        Edges</label>
                     <label><input type="checkbox" id="toggle-orthogonal"> Orthogonal</label>
                     <label><input type="checkbox" id="toggle-boxes" checked> File Boxes</label>
                     <label><input type="checkbox" id="toggle-folder-boxes" checked> Folder Boxes</label>
-                    <span class="control-divider"></span>
-                    <button type="button" id="btn-toggle-dim" class="control-btn toggle-btn active" title="Toggle dimming unhighlighted elements to 50% opacity">◐ Dim Others: ON</button>
-                    <button type="button" id="btn-toggle-thickness" class="control-btn toggle-btn active" title="Scale edge thickness by call frequency. Turn the Edges toggle on to see it.">↔ Thick Edges: ON</button>
+                    <label><input type="checkbox" id="toggle-hidden"
+                            title="Show folders and files that were hidden with right-click."> Show Hidden</label>
                     <span class="control-divider"></span>
                     <div class="collapse-controls">
-                        <button type="button" id="btn-open-all" class="control-btn" title="Open everything: expand all folders and files">Open All</button>
-                        <button type="button" id="btn-folders-only" class="control-btn" title="Open every folder only: keep files collapsed">Folders Only</button>
-                        <button type="button" id="btn-close-all" class="control-btn" title="Close everything: collapse all folders and files">Close All</button>
+                        <button type="button" id="btn-open-all" class="control-btn"
+                            title="Open everything: expand all folders and files">Open All</button>
+                        <button type="button" id="btn-folders-only" class="control-btn"
+                            title="Open every folder only: keep files collapsed">Folders Only</button>
+                        <button type="button" id="btn-close-all" class="control-btn"
+                            title="Close everything: collapse all folders and files">Close All</button>
                     </div>
                 </div>
             </div>
@@ -1034,7 +1221,27 @@
 
     <!-- Context menu (hidden by default, positioned on right-click) -->
     <div id="context-menu">
-        <div id="ctx-open-tab">🔍 Open in Side Tab</div>
+        <div id="ctx-open-tab" class="ctx-item">🔍 Open in Side Tab</div>
+        <div id="ctx-hide-file" class="ctx-item">🚫 Hide File</div>
+        <div id="ctx-hide-folder" class="ctx-item">🚫 Hide Folder</div>
+    </div>
+
+    <!-- Mini docs popup (opened by the i button, shown on first visit) -->
+    <div id="info-overlay" role="dialog" aria-modal="true" aria-labelledby="info-title">
+        <div id="info-popup">
+            <button type="button" id="info-popup-close" title="Close" aria-label="Close">✕</button>
+            <h2 id="info-title">How to use this graph</h2>
+            <ul>
+                <li><strong>Hover</strong> a node to highlight its direct callers and callees.</li>
+                <li><strong>Click</strong> a node to pin everything connected to it; click it again or click the empty
+                    background to clear.</li>
+                <li><strong>Right-click</strong> a function to open it in a side tab, or a function, file, or folder to
+                    hide it. Tick <em>Show Hidden</em> to bring hidden items back.</li>
+                <li><strong>Search</strong> functions, files, and folders in the top bar (Ctrl+F); press Enter to jump
+                    through matches.</li>
+                <li><strong>Open and close boxes</strong> to see what folders and files contain which functions.</li>
+            </ul>
+        </div>
     </div>
 
     <!-- D3.js library from CDN -->
@@ -1048,4 +1255,5 @@
     <script src="panel.js"></script>
     <script src="main.js"></script>
 </body>
+
 </html>

@@ -10,10 +10,10 @@ This project visualizes the full reachable call graph of the `icon.f90` codebase
 
 The visualization logic is split into multiple focused JavaScript files for better maintainability:
 
-* **`index.html`**: The main user interface containing controls (toggles for edges, file boxes, and folder boxes) and the visualization container.
+* **`index.html`**: The main user interface containing controls (toggles for edges, file boxes, folder boxes, and showing hidden items) and the visualization container.
 * **`parser.js`**: Parses the raw Graphviz `.dot` file (`callgraph_folders.dot`) into a usable internal format of nodes and edges, and reads each edge's call-count `weight`.
 * **`layout.js`**: Handles the heavy lifting for calculating graph layout. It breaks cycles using DFS, assigns nodes to strict downward layers using the Longest-Path algorithm, and inserts invisible "Dummy Nodes" for edges spanning multiple layers. It applies a **Node Promotion Heuristic** to push nodes to higher layers, deleting dummy nodes and compressing the graph's horizontal width. It then optimizes the layout via simulated annealing to minimize edge crossings within file columns.
-* **`render.js`**: Responsible for the visual representation using D3.js. It renders nodes, edges, horizontal level lines, and colored file and folder bounding boxes. It also scales edge stroke width by call frequency when the **Thick Edges** toggle is enabled.
+* **`render.js`**: Responsible for the visual representation using D3.js. It renders nodes, edges, horizontal level lines, and colored file and folder bounding boxes. It also scales edge stroke width by call frequency. Right-click a function, file, or folder to hide it; the **Show Hidden** checkbox at the top brings hidden items back.
 * **`main.js`**: The central entry point that loads the `.dot` data, ties the parser, layout, and rendering logic together, and initializes UI event listeners.
 
 Other folders:
@@ -46,11 +46,9 @@ This writes `callgraph.dot` and `callgraph_folders.dot` to the repository root.
 The `weight` attribute records how many times one function calls another (the
 number of call sites, determined statically).
 
-The viewer reads that weight and, when the **Thick Edges** toggle is on (together
-with the **Edges** toggle), scales the edge stroke width logarithmically with the
-call count — thicker edges mean the caller invokes the callee more times. Click
-**Thick Edges** in the toolbar to toggle this on/off; it applies to the main view
-and to every side-panel tab.
+The viewer reads that weight and scales the edge stroke width logarithmically
+with the call count — thicker edges mean the caller invokes the callee more
+times. This applies to the main view and to every side-panel tab.
 
 ## Start
 

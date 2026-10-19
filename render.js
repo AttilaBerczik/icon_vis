@@ -1,5 +1,18 @@
 // Context menu target (shared across all graph instances on this page)
 let contextMenuNodeId = null;
+let contextMenuTarget = null;
+
+// Dimming unhighlighted elements and weighting edge thickness by call count are
+// always on now (their toolbar toggles were removed).
+window.dimHighlightEnabled = true;
+window.edgeThicknessEnabled = true;
+
+// Right-click "Hide file/folder" state. These live on `window` because layout.js
+// reads them while building the graph levels. `showHiddenFiles` is the state of
+// the "Show Hidden" checkbox and defaults to off.
+window.hiddenFolders = window.hiddenFolders || new Set();
+window.hiddenFiles = window.hiddenFiles || new Set();
+window.showHiddenFiles = false;
 
 // Global persistent color maps ensuring 100% consistent folder and file box colors
 // across main view, side panel tabs, and sub-graphs.
@@ -28,6 +41,77 @@ window.globalFolderColorMap = globalFolderColorMap;
 window.globalFileColorMap = globalFileColorMap;
 window.getFolderColor = getFolderColor;
 window.getFileColor = getFileColor;
+
+// --- Shared context menu -----------------------------------------------------
+// The main view and the side-panel graphs share one context menu. A target is
+// one of:
+//   { kind: "node",   nodeId, folder, fileKey, functionName }
+//   { kind: "folder", folder }
+//   { kind: "file",   folder, fileKey, fileName }
+function setContextMenuItem(id, visible, label) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = visible ? "block" : "none";
+    if (label !== undefined) el.textContent = label;
+}
+
+function isContextTargetFolderHidden(target) {
+    return !!(target && target.folder && window.hiddenFolders.has(target.folder));
+}
+
+function isContextTargetFileHidden(target) {
+    return !!(target && target.fileKey && window.hiddenFiles.has(target.fileKey));
+}
+
+function showGraphContextMenu(event, target) {
+    if (!target) return;
+    contextMenuTarget = target;
+    contextMenuNodeId = (target.kind === "node") ? target.nodeId : null;
+
+    const rootInfo = window.mainRootInfo;
+    const folderProtected = !!(rootInfo && target.folder && rootInfo.folder === target.folder);
+    const fileProtected = !!(rootInfo && target.fileKey && rootInfo.fileKey === target.fileKey);
+
+    if (target.kind === "node") {
+        setContextMenuItem("ctx-open-tab", true, `🔍 Open "${target.functionName}" in Side Tab`);
+    } else {
+        setContextMenuItem("ctx-open-tab", false);
+    }
+
+    if (target.fileKey && !fileProtected) {
+        const hidden = isContextTargetFileHidden(target);
+        const name = target.fileName || target.fileKey;
+        setContextMenuItem("ctx-hide-file", true, hidden ? `👁 Unhide file "${name}"` : `🚫 Hide file "${name}"`);
+    } else {
+        setContextMenuItem("ctx-hide-file", false);
+    }
+
+    if (target.folder && !folderProtected) {
+        const hidden = isContextTargetFolderHidden(target);
+        setContextMenuItem("ctx-hide-folder", true, hidden ? `👁 Unhide folder "${target.folder}"` : `🚫 Hide folder "${target.folder}"`);
+    } else {
+        setContextMenuItem("ctx-hide-folder", false);
+    }
+
+    const ctxMenu = document.getElementById("context-menu");
+    if (!ctxMenu) return;
+
+    ctxMenu.style.display = "block";
+    ctxMenu.style.left = "0px";
+    ctxMenu.style.top = "0px";
+
+    // Keep the menu inside the viewport.
+    const margin = 8;
+    const width = ctxMenu.offsetWidth;
+    const height = ctxMenu.offsetHeight;
+    let left = event.clientX;
+    let top = event.clientY;
+    if (left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin);
+    if (top + height > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - height - margin);
+    ctxMenu.style.left = left + "px";
+    ctxMenu.style.top = top + "px";
+}
+window.showGraphContextMenu = showGraphContextMenu;
 
 // Collapsed boxes keep a fixed width, so show as much of the name as fits
 // instead of the old 3-character abbreviation.
@@ -73,10 +157,10 @@ function getReadableTextColor(color) {
 }
 
 // --- Edge thickness (call frequency) --------------------------------------
-// Edges carry `weight=<number of call sites>` (parsed in parser.js). When the
-// "Thick Edges" toggle is on, the base stroke width is scaled logarithmically
-// with the weight so that frequently-called links stand out. The bounds live in
-// constants.js (EDGE_WIDTH_MIN / EDGE_WIDTH_MAX).
+// Edges carry `weight=<number of call sites>` (parsed in parser.js). The base
+// stroke width is always scaled logarithmically with the weight so that
+// frequently-called links stand out. The bounds live in constants.js
+// (EDGE_WIDTH_MIN / EDGE_WIDTH_MAX).
 
 function isEdgeThicknessEnabled() {
     return window.edgeThicknessEnabled !== false;
@@ -881,7 +965,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         const label = meta.file ? meta.file : f;
 
         fileBoxData.push({
-            file: f, label,
+            file: f, label, folder: meta.folder,
             x: minX - BOX_PADDING,
             y: yRange.minY - FILE_BOX_PAD_TOP,
             width: maxX - minX + 2 * BOX_PADDING,
@@ -1040,6 +1124,12 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("stroke", d => d.color).attr("stroke-width", 2)
         .attr("stroke-dasharray", "8,4").attr("rx", FOLDER_BOX_CORNER_RADIUS);
 
+    folderRects.on("contextmenu", (event, d) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showGraphContextMenu(event, { kind: "folder", folder: d.folder });
+    });
+
     const folderToggles = folderRects.append("g")
         .style("cursor", "pointer")
         .on("click", (event, d) => {
@@ -1075,6 +1165,17 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.08)
         .attr("stroke", d => d.color).attr("stroke-width", 2)
         .attr("stroke-dasharray", "5,5").attr("rx", FILE_BOX_CORNER_RADIUS);
+
+    fileRects.on("contextmenu", (event, d) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showGraphContextMenu(event, {
+            kind: "file",
+            folder: d.folder,
+            fileKey: d.file,
+            fileName: d.label
+        });
+    });
 
     const fileToggles = fileRects.append("g")
         .style("cursor", "pointer")
@@ -1183,9 +1284,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         }
     };
 
-    // Re-apply stroke widths to the currently rendered edges. Called when the
-    // "Thick Edges" toggle changes. Edges created later (viewport culling) pick
-    // up the current setting automatically when they are (re)entered.
+    // Re-apply stroke widths to the currently rendered edges. Edges created
+    // later (viewport culling) pick up the current setting automatically when
+    // they are (re)entered.
     container.node().updateEdgeThickness = function() {
         edgesGroup.selectAll("path.graph-edge")
             .attr("stroke-width", (d) => computeEdgeStrokeWidth(d));
@@ -2156,6 +2257,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
 
         for (const nodeId of activeSet) {
             if (!nodeId || nodeId === primaryId || String(nodeId).startsWith("dummy|")) continue;
+            if (typeof isGraphNodeHidden === "function" && isGraphNodeHidden(nodeId, nodes)) continue;
             const rawLabel = nodes.get(nodeId);
             if (!rawLabel) continue;
 
@@ -2455,17 +2557,14 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             event.preventDefault();
             event.stopPropagation();
 
-            contextMenuNodeId = d.id;
-            const ctxMenu = document.getElementById("context-menu");
-            if (!ctxMenu) return;
-
-            const functionName = d.lines[d.lines.length - 1];
-            const ctxLabel = document.getElementById("ctx-open-tab");
-            if (ctxLabel) ctxLabel.textContent = `🔍 Open "${functionName}" in Side Tab`;
-
-            ctxMenu.style.display = "block";
-            ctxMenu.style.left = event.clientX + "px";
-            ctxMenu.style.top = event.clientY + "px";
+            showGraphContextMenu(event, {
+                kind: "node",
+                nodeId: d.id,
+                folder: d.folder,
+                fileKey: d.fileKey,
+                fileName: d.file,
+                functionName: d.lines[d.lines.length - 1]
+            });
         });
 
     // --- High-Performance Event Delegation on Edges Group ---

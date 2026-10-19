@@ -64,7 +64,7 @@ const FOCUS_GRAPH_MARGIN = 24;       // outer margin when focused on a node
 const MIN_SVG_WIDTH = 900;           // smallest canvas width
 
 // --- Edges -------------------------------------------------------------------
-// When the "Thick Edges" toggle is on, stroke width is scaled logarithmically
-// with the call frequency between these two bounds.
+// Edge stroke width is scaled logarithmically with the call frequency between
+// these two bounds (thick edges are always on).
 const EDGE_WIDTH_MIN = 1;
 const EDGE_WIDTH_MAX = 8;

@@ -149,8 +149,49 @@ function nodePromotionHeuristic(V, dagEdges, preds, layering) {
     return layering;
 }
 
+// --- Hidden folder / file filtering -----------------------------------------
+// Right-clicking a folder or file hides it (sets live on `window`, see
+// render.js). While "Show Hidden" is off, hidden nodes are removed from the
+// graph before the layer assignment runs, so the layout closes up around them
+// instead of leaving empty rows behind.
+function isHiddenVisibilityFilterActive() {
+    if (typeof window === "undefined" || window.showHiddenFiles) return false;
+    const folders = window.hiddenFolders;
+    const files = window.hiddenFiles;
+    return !!((folders && folders.size) || (files && files.size));
+}
+
+function isGraphNodeHidden(id, nodes) {
+    if (id == null || String(id).startsWith("dummy|")) return false;
+    if (!isHiddenVisibilityFilterActive()) return false;
+
+    const rawLabel = (nodes && nodes.get(id)) || id;
+    const info = parseNodeLabel(rawLabel);
+    if (info.folder && window.hiddenFolders && window.hiddenFolders.has(info.folder)) return true;
+
+    const fileKey = makeFileKey(info.folder, info.file);
+    return !!(fileKey && window.hiddenFiles && window.hiddenFiles.has(fileKey));
+}
+
+function buildVisibleEdgeMap(edges, nodes) {
+    const visibleEdges = new Map();
+    for (const [from, targets] of edges.entries()) {
+        if (isGraphNodeHidden(from, nodes)) continue;
+
+        const keptTargets = [];
+        for (const target of targets) {
+            if (!isGraphNodeHidden(target, nodes)) keptTargets.push(target);
+        }
+        if (keptTargets.length > 0) visibleEdges.set(from, keptTargets);
+    }
+    return visibleEdges;
+}
+
 function buildLevels(rootId, edges, nodes) {
-    const dagEdges = makeDAG(rootId, edges);
+    const layoutEdges = isHiddenVisibilityFilterActive()
+        ? buildVisibleEdgeMap(edges, nodes)
+        : edges;
+    const dagEdges = makeDAG(rootId, layoutEdges);
 
     const V = new Set();
     V.add(rootId);

@@ -320,6 +320,35 @@ class DetailPanelManager {
         });
     }
 
+    // Rebuild every open tab after hidden folders/files changed. Re-rendering
+    // (rather than patching the DOM) lets buildLevels drop the hidden nodes and
+    // close the layout gaps they used to occupy.
+    refreshVisibility() {
+        if (!this.tabs.length) return;
+
+        const tabNodeIds = this.tabs.map(t => t.nodeId);
+        const activeNodeId = this.getActiveNodeId();
+
+        this.tabs.forEach(tab => {
+            if (tab.tabBtn && tab.tabBtn.parentNode) {
+                tab.tabBtn.parentNode.removeChild(tab.tabBtn);
+            }
+            if (tab.contentContainer && tab.contentContainer.parentNode) {
+                tab.contentContainer.parentNode.removeChild(tab.contentContainer);
+            }
+        });
+        this.tabs = [];
+        this.activeTabId = null;
+
+        let activeTabId = null;
+        tabNodeIds.forEach(nodeId => {
+            const tabId = this.openTab(nodeId);
+            if (tabId && nodeId === activeNodeId) activeTabId = tabId;
+        });
+
+        if (activeTabId) this.switchTab(activeTabId);
+    }
+
     refreshHighlight() {
         if (!this.contentArea) return;
         const activeTab = this.tabs.find(t => t.id === this.activeTabId);

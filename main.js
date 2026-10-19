@@ -1,6 +1,10 @@
 const ROOT_FILE = "icon.f90";
 const ROOT_FUNCTION = "__MAIN__";
 
+// Keeps the pristine graph and the live main-view state so the graph can be
+// rebuilt after a folder/file is hidden or the "Show Hidden" option changes.
+let mainViewContext = null;
+
 fetch("callgraph_folders.dot")
     .then((response) => {
         if (!response.ok) {
@@ -44,32 +48,47 @@ fetch("callgraph_folders.dot")
         }
 
         // --- MAIN VIEW MODE ---
-        renderMainMode(nodes, edges);
+        // Always build the view from the pristine data: buildLevels mutates the
+        // maps it is given (adds dummy nodes and rewrites the edge map).
+        renderMainMode(pristineNodes, pristineEdges);
     })
     .catch((error) => {
         renderError(error.message);
     });
 
-function renderMainMode(nodes, edges) {
-    let rootId = null;
+function findRootId(nodes) {
     for (const [id, label] of nodes.entries()) {
         const labelInfo = parseNodeLabel(label);
         const functionName = labelInfo.lines[labelInfo.lines.length - 1];
         if (labelInfo.file === ROOT_FILE && functionName === ROOT_FUNCTION) {
-            rootId = id;
-            break;
+            return id;
         }
     }
+    return null;
+}
+
+function renderMainMode(pristineNodes, pristineEdges) {
+    const rootId = findRootId(pristineNodes);
     if (!rootId) {
         renderError("Could not find icon.f90\\n__MAIN__ in callgraph.dot.");
         return;
     }
 
+    // Never let the hidden filter hide the root item: the graph would lose its
+    // starting point. Both the context menu and this guard use mainRootInfo.
+    const rootLabel = parseNodeLabel(pristineNodes.get(rootId));
+    window.mainRootInfo = {
+        folder: rootLabel.folder,
+        fileKey: makeFileKey(rootLabel.folder, rootLabel.file)
+    };
+
+    const nodes = cloneNodes(pristineNodes);
+    const edges = cloneEdges(pristineEdges);
     const container = d3.select("#visualization");
     const state = createGraphState();
 
     const { levels, depthById } = buildLevels(rootId, edges, nodes);
-    renderGraph(levels, depthById, nodes, edges, container, state, {
+    const options = {
         collapseAllOnInit: true,
         onNodeHover: (hId, activeSet) => {
             if (window.detailPanelManager && typeof window.detailPanelManager.highlightNodeHover === "function") {
@@ -86,7 +105,11 @@ function renderMainMode(nodes, edges) {
                 window.detailPanelManager.selectNode(cId, activeSet);
             }
         }
-    });
+    };
+
+    mainViewContext = { rootId, pristineNodes, pristineEdges, container, state, options };
+
+    renderGraph(levels, depthById, nodes, edges, container, state, options);
 
     // Seed any remaining unreached folders/files in nodes to ensure they also have locked-in consistent colors
     for (const [id, rawLabel] of nodes.entries()) {
@@ -102,6 +125,46 @@ function renderMainMode(nodes, edges) {
 
     setupSearchUI(container.node());
 }
+
+// Rebuild the main graph after the hidden folders/files changed. The layout is
+// recomputed from the pristine graph so hidden nodes stop reserving space.
+function rebuildMainView() {
+    if (!mainViewContext) return;
+
+    const { rootId, pristineNodes, pristineEdges, container, state, options } = mainViewContext;
+    const nodes = cloneNodes(pristineNodes);
+    const edges = cloneEdges(pristineEdges);
+    const { levels, depthById } = buildLevels(rootId, edges, nodes);
+
+    state.currentGraphData = { levels, depthById, nodes, edges };
+    state.cachedLayout = null;
+    state.searchState = null;
+    // Keep the current camera (zoom + pan position) instead of fitting the
+    // rebuilt graph back to the screen. Hiding a folder should not throw the
+    // user out of the area they were inspecting.
+    state.needsFitToScreen = false;
+
+    renderGraph(levels, depthById, nodes, edges, container, state, {
+        ...options,
+        collapseAllOnInit: false
+    });
+}
+
+function refreshGraphVisibility() {
+    rebuildMainView();
+
+    if (window.detailPanelManager && typeof window.detailPanelManager.refreshVisibility === "function") {
+        window.detailPanelManager.refreshVisibility();
+    }
+
+    // If a search is active, re-run it against the new graph so stale matches
+    // to hidden items are dropped and the match counter is recalculated.
+    const searchInput = document.getElementById("graph-search-input");
+    if (searchInput && searchInput.value.trim()) {
+        searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+}
+window.refreshGraphVisibility = refreshGraphVisibility;
 
 // --- Toggle Controls ---
 const toggleEdges = document.getElementById("toggle-edges");
@@ -148,62 +211,36 @@ if (toggleOrthogonal) {
     });
 }
 
-// --- Dim Unhighlighted Toggle Control ---
+// --- Hidden Files / Folders ---
+// Right-clicking a function, file, or folder offers to hide it. While "Show
+// Hidden" is unticked (the default) hidden items are removed from the graph.
+// Dimming unhighlighted elements and call-frequency edge thickness are always
+// on; only their toolbar toggles were removed.
 window.dimHighlightEnabled = true;
+window.edgeThicknessEnabled = true;
 
-window.setDimHighlight = function(enabled) {
-    window.dimHighlightEnabled = !!enabled;
-    const btn = document.getElementById("btn-toggle-dim");
-    if (btn) {
-        btn.classList.toggle("active", window.dimHighlightEnabled);
-        btn.textContent = window.dimHighlightEnabled ? "◐ Dim Others: ON" : "○ Dim Others: OFF";
-        btn.title = window.dimHighlightEnabled ?
-            "Toggle dimming unhighlighted elements to 50% opacity (currently ON)" :
-            "Toggle dimming unhighlighted elements to 50% opacity (currently OFF)";
-    }
-    // Refresh highlight state on the main visualization container
-    const visNodes = [document.getElementById("visualization")];
-    visNodes.forEach(node => {
-        if (node && typeof node.refreshHighlight === "function") {
-            node.refreshHighlight();
-        }
-    });
-    if (window.detailPanelManager && typeof window.detailPanelManager.refreshHighlight === "function") {
-        window.detailPanelManager.refreshHighlight();
-    }
-};
-
-const btnToggleDim = document.getElementById("btn-toggle-dim");
-if (btnToggleDim) {
-    btnToggleDim.addEventListener("click", () => {
-        window.setDimHighlight(!window.dimHighlightEnabled);
+const toggleHidden = document.getElementById("toggle-hidden");
+if (toggleHidden) {
+    toggleHidden.checked = false;
+    window.showHiddenFiles = false;
+    toggleHidden.addEventListener("change", (e) => {
+        window.showHiddenFiles = e.target.checked;
+        refreshGraphVisibility();
     });
 }
 
-// --- Edge Thickness (call frequency) Toggle Control ---
-// Edge weights come from the `weight=<call count>` attribute written by the
-// callGraph generator. When enabled, thicker edges mean the caller calls the
-// callee more times. Visible once the "Edges" toggle is on.
-window.edgeThicknessEnabled = true;
+function toggleHiddenFolder(folder) {
+    if (!folder) return;
+    if (window.hiddenFolders.has(folder)) window.hiddenFolders.delete(folder);
+    else window.hiddenFolders.add(folder);
+    refreshGraphVisibility();
+}
 
-window.setEdgeThickness = function(enabled) {
-    window.edgeThicknessEnabled = !!enabled;
-    const btn = document.getElementById("btn-toggle-thickness");
-    if (btn) {
-        btn.classList.toggle("active", window.edgeThicknessEnabled);
-        btn.textContent = window.edgeThicknessEnabled ? "↔ Thick Edges: ON" : "↔ Thick Edges: OFF";
-        btn.title = window.edgeThicknessEnabled
-            ? "Edge thickness reflects call frequency (currently ON). Turn the Edges toggle on to see it."
-            : "Edge thickness reflects call frequency (currently OFF).";
-    }
-    applyContainerAction("updateEdgeThickness");
-};
-
-const btnToggleThickness = document.getElementById("btn-toggle-thickness");
-if (btnToggleThickness) {
-    btnToggleThickness.addEventListener("click", () => {
-        window.setEdgeThickness(!window.edgeThicknessEnabled);
-    });
+function toggleHiddenFile(fileKey) {
+    if (!fileKey) return;
+    if (window.hiddenFiles.has(fileKey)) window.hiddenFiles.delete(fileKey);
+    else window.hiddenFiles.add(fileKey);
+    refreshGraphVisibility();
 }
 
 // --- Expand / Collapse Shorthand Controls ---
@@ -234,11 +271,30 @@ if (btnCloseAll) {
 }
 
 // --- Context Menu Wiring ---
+function closeContextMenu() {
+    const ctxMenu = document.getElementById("context-menu");
+    if (ctxMenu) ctxMenu.style.display = "none";
+}
+
 document.getElementById("ctx-open-tab").addEventListener("click", () => {
     if (contextMenuNodeId && window.detailPanelManager) {
         window.detailPanelManager.openTab(contextMenuNodeId);
     }
-    document.getElementById("context-menu").style.display = "none";
+    closeContextMenu();
+});
+
+document.getElementById("ctx-hide-file").addEventListener("click", () => {
+    closeContextMenu();
+    if (contextMenuTarget && contextMenuTarget.fileKey) {
+        toggleHiddenFile(contextMenuTarget.fileKey);
+    }
+});
+
+document.getElementById("ctx-hide-folder").addEventListener("click", () => {
+    closeContextMenu();
+    if (contextMenuTarget && contextMenuTarget.folder) {
+        toggleHiddenFolder(contextMenuTarget.folder);
+    }
 });
 
 // Dismiss context menu on click elsewhere
@@ -252,6 +308,11 @@ document.addEventListener("click", (e) => {
 // Dismiss on Escape (first close context menu if open, otherwise close active detail tab)
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+        const infoOverlay = document.getElementById("info-overlay");
+        if (infoOverlay && infoOverlay.classList.contains("open")) {
+            closeInfoPopup();
+            return;
+        }
         const ctxMenu = document.getElementById("context-menu");
         if (ctxMenu && ctxMenu.style.display !== "none") {
             ctxMenu.style.display = "none";
@@ -388,4 +449,47 @@ function setupSearchUI(visContainerNode) {
             searchInput.select();
         }
     });
+}
+// --- Mini Docs / Info Popup ---
+const INFO_SEEN_KEY = "iconVisInfoSeen";
+
+function openInfoPopup() {
+    const overlay = document.getElementById("info-overlay");
+    if (!overlay) return;
+    overlay.classList.add("open");
+}
+
+function closeInfoPopup() {
+    const overlay = document.getElementById("info-overlay");
+    if (!overlay) return;
+    overlay.classList.remove("open");
+}
+
+const infoBtn = document.getElementById("info-btn");
+if (infoBtn) {
+    infoBtn.addEventListener("click", openInfoPopup);
+}
+
+const infoOverlay = document.getElementById("info-overlay");
+if (infoOverlay) {
+    // Clicking the dimmed backdrop closes the popup.
+    infoOverlay.addEventListener("click", (e) => {
+        if (e.target === infoOverlay) closeInfoPopup();
+    });
+}
+
+const infoCloseBtn = document.getElementById("info-popup-close");
+if (infoCloseBtn) {
+    infoCloseBtn.addEventListener("click", closeInfoPopup);
+}
+
+// Show the guide automatically the first time the site is opened.
+try {
+    if (localStorage.getItem(INFO_SEEN_KEY) !== "1") {
+        localStorage.setItem(INFO_SEEN_KEY, "1");
+        openInfoPopup();
+    }
+} catch (err) {
+    // localStorage can be unavailable (private mode / file://); show it anyway.
+    openInfoPopup();
 }
