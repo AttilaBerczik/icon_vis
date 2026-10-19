@@ -53,7 +53,12 @@ const MIN_LANE_GAP = 4;              // vertical space per edge lane
 const TIGHT_Y_SPACING = 64;          // minimum vertical gap between two levels (tight layout)
 const TIGHT_Y_SPACING_EXTRA = FILE_BOX_PAD_TOP + FILE_BOX_PAD_BOTTOM; // room for adjacent boxes' padding
 const COLUMN_SLOT_GAP = 40;          // gap between adjacent column slots
-const COLLAPSED_WIDTH = 16;          // width of a collapsed folder/file column
+// Collapsed folder/file boxes have a fixed width so short names do not shrink
+// them and long names still get the same amount of readable text. The width
+// fits the toggle button plus up to COLLAPSED_LABEL_MAX_CHARS characters and a
+// small ".." truncation marker.
+const COLLAPSED_LABEL_MAX_CHARS = 10;
+const COLLAPSED_WIDTH = 85;          // width of a collapsed folder/file column
 const GRAPH_MARGIN = 32;             // outer margin of the whole graph
 const FOCUS_GRAPH_MARGIN = 24;       // outer margin when focused on a node
 const MIN_SVG_WIDTH = 900;           // smallest canvas width

@@ -29,6 +29,49 @@ window.globalFileColorMap = globalFileColorMap;
 window.getFolderColor = getFolderColor;
 window.getFileColor = getFileColor;
 
+// Collapsed boxes keep a fixed width, so show as much of the name as fits
+// instead of the old 3-character abbreviation.
+function collapsedBoxLabel(text) {
+    if (!text) return "";
+    return text.length > COLLAPSED_LABEL_MAX_CHARS
+        ? text.substring(0, COLLAPSED_LABEL_MAX_CHARS) + ".."
+        : text;
+}
+
+// Folder/file colours come from pastel palettes, so using them directly for
+// text on the white canvas leaves labels almost invisible. Darken the colour
+// (preserving its hue) until it has enough contrast to read comfortably.
+const readableTextColorCache = new Map();
+
+function getReadableTextColor(color) {
+    const cacheKey = String(color);
+    if (readableTextColorCache.has(cacheKey)) return readableTextColorCache.get(cacheKey);
+
+    const hsl = d3.hsl(color);
+    if (!hsl) return "#1f2937";
+
+    const channelLuminance = (value) => {
+        const v = value / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    const luminance = () => {
+        const rgb = d3.rgb(hsl);
+        return 0.2126 * channelLuminance(rgb.r)
+            + 0.7152 * channelLuminance(rgb.g)
+            + 0.0722 * channelLuminance(rgb.b);
+    };
+
+    // 5:1 against white leaves a little headroom for the tinted box fill.
+    let guard = 0;
+    while (1.05 / (luminance() + 0.05) < 5 && guard++ < 50) {
+        hsl.l = Math.max(0, hsl.l - 0.02);
+    }
+
+    const readable = hsl.formatHex();
+    readableTextColorCache.set(cacheKey, readable);
+    return readable;
+}
+
 // --- Edge thickness (call frequency) --------------------------------------
 // Edges carry `weight=<number of call sites>` (parsed in parser.js). When the
 // "Thick Edges" toggle is on, the base stroke width is scaled logarithmically
@@ -1011,17 +1054,17 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     folderToggles.append("rect")
         .attr("x", d => d.x + 5).attr("y", d => d.y + 5).attr("width", 16).attr("height", 16)
-        .attr("fill", "#fff").attr("stroke", d => d.color).attr("rx", 3);
+        .attr("fill", "#fff").attr("stroke", d => getReadableTextColor(d.color)).attr("rx", 3);
     folderToggles.append("text")
         .attr("x", d => d.x + 13).attr("y", d => d.y + 17).attr("text-anchor", "middle")
-        .style("font-size", "14px").style("font-weight", "bold").attr("fill", d => d.color)
+        .style("font-size", "14px").style("font-weight", "bold").attr("fill", d => getReadableTextColor(d.color))
         .text(d => d.collapsed ? "+" : "-");
 
     folderRects.append("text")
         .attr("class", "folder-box-label")
         .attr("x", d => d.x + 28).attr("y", d => d.y + 18)
-        .attr("fill", d => d.color).style("font-weight", "bold").style("font-size", "14px")
-        .text(d => d.collapsed ? d.folder.substring(0, 3) + ".." : d.folder)
+        .attr("fill", d => getReadableTextColor(d.color)).style("font-weight", "bold").style("font-size", "14px")
+        .text(d => d.collapsed ? collapsedBoxLabel(d.folder) : d.folder)
         .append("title").text(d => d.folder);
 
     // --- Render Files ---
@@ -1047,17 +1090,17 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     fileToggles.append("rect")
         .attr("x", d => d.x + 5).attr("y", d => d.y + 5).attr("width", 14).attr("height", 14)
-        .attr("fill", "#fff").attr("stroke", d => d.color).attr("rx", 3);
+        .attr("fill", "#fff").attr("stroke", d => getReadableTextColor(d.color)).attr("rx", 3);
     fileToggles.append("text")
         .attr("x", d => d.x + 12).attr("y", d => d.y + 16).attr("text-anchor", "middle")
-        .style("font-size", "12px").style("font-weight", "bold").attr("fill", d => d.color)
+        .style("font-size", "12px").style("font-weight", "bold").attr("fill", d => getReadableTextColor(d.color))
         .text(d => d.collapsed ? "+" : "-");
 
     fileRects.append("text")
         .attr("class", "file-box-label")
         .attr("x", d => d.x + 25).attr("y", d => d.y + 16)
-        .attr("fill", d => d.color).style("font-weight", "bold").style("font-size", "12px")
-        .text(d => d.collapsed ? d.label.substring(0, 3) + ".." : d.label)
+        .attr("fill", d => getReadableTextColor(d.color)).style("font-weight", "bold").style("font-size", "12px")
+        .text(d => d.collapsed ? collapsedBoxLabel(d.label) : d.label)
         .append("title").text(d => d.label);
 
     // Phase 2: Index edges by node ID for O(1) interaction lookups
