@@ -209,6 +209,8 @@ function createGraphState() {
         activeClickedNodeId: null,
         pendingHoverNodeId: null,
         pendingHoverActiveSet: null,
+        pendingClickedNodeId: null,
+        pendingClickedActiveSet: null,
         // Main-view caller/callee roles anchored to the active side-panel tab.
         roleAnchorId: null,
         roleMap: null,
@@ -2245,11 +2247,12 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         return !!(relatedTarget && relatedTarget.closest && relatedTarget.closest(".node-g, .graph-edge"));
     }
 
-    // A hovered node reveals the edges to/from its immediate neighbours. If a
-    // neighbour lives in a collapsed folder or file, that edge would otherwise
+    // A hovered node/edge or a clicked node/edge highlights a set of nodes. If
+    // one of them lives in a collapsed folder or file, its edge would otherwise
     // end on a closed box instead of on a node. Open exactly those containers
-    // (the ones the highlighted edges lead to) so the edge target is visible.
-    // Returns true when the collapse state changed and a re-render is needed.
+    // (the ones the highlighted edges lead to) so every highlighted node is
+    // visible. Returns true when the collapse state changed and a re-render is
+    // needed.
     function expandBoxesForHighlight(activeSet, primaryId) {
         if (!activeSet || !state || !state.currentGraphData || !state.currentGraphData.nodes) return false;
         const nodes = state.currentGraphData.nodes;
@@ -2276,12 +2279,13 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         return changed;
     }
 
-    // Re-render after a hover-driven expansion while keeping the hovered node
-    // highlighted. The DOM is replaced, so the regular mouseover/mouseout pair
-    // will not fire for the old element; a one-shot mousemove guard clears the
-    // restored highlight as soon as the pointer leaves the new element.
-    function renderForHoverExpansion(primaryId, activeSet) {
-        // Remember where the hovered node currently sits on screen. Opening
+    // Re-render after a highlight-driven expansion. The anchor node stays
+    // highlighted (and, for a click, the selection is restored as well).
+    // The DOM is replaced, so the regular mouseover/mouseout pair will not fire
+    // for the old element; a one-shot mousemove guard clears a restored hover
+    // as soon as the pointer leaves the new element.
+    function renderForExpansion(primaryId, activeSet, keepClickedSelection) {
+        // Remember where the anchor node currently sits on screen. Opening
         // boxes re-flows the layout, which would otherwise move the node (and
         // the node under the pointer) far away. Compensate the camera after the
         // re-render so the node stays pinned to exactly the same screen spot.
@@ -2290,10 +2294,16 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         const screenX = oldPos ? oldPos.x * oldTransform.k + oldTransform.x : null;
         const screenY = oldPos ? oldPos.y * oldTransform.k + oldTransform.y : null;
 
-        state.pendingHoverNodeId = primaryId;
-        state.pendingHoverActiveSet = activeSet;
+        if (keepClickedSelection) {
+            state.activeClickedNodeId = primaryId;
+            state.pendingClickedNodeId = primaryId;
+            state.pendingClickedActiveSet = activeSet;
+        } else {
+            state.pendingHoverNodeId = primaryId;
+            state.pendingHoverActiveSet = activeSet;
+        }
         // Do not re-run search-focus camera moves from the options that were
-        // used for the previous render; the hover anchor is applied instead.
+        // used for the previous render; the anchor is applied instead.
         const { focusSearchNodeId, animateToNode, ...renderOptions } = options || {};
         renderGraph(
             state.currentGraphData.levels,
@@ -2320,6 +2330,14 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         if (typeof container.node().updateViewportCulling === "function") {
             container.node().updateViewportCulling(true);
         }
+    }
+
+    function renderForHoverExpansion(primaryId, activeSet) {
+        renderForExpansion(primaryId, activeSet, false);
+    }
+
+    function renderForClickExpansion(primaryId, activeSet) {
+        renderForExpansion(primaryId, activeSet, true);
     }
 
     function installHoverClearGuard() {
@@ -2457,8 +2475,22 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
     });
     state.updateHighlightState = updateHighlightState;
 
-    // Restore active clicked node or search state
-    if (activeClickedNodeId && nodeElementsById.has(activeClickedNodeId)) {
+    // Restore the highlight after a re-render. A click-driven expansion wins
+    // over the regular active-click restore: the highlighted set is the full
+    // connected set that was computed before the re-render (and can differ from
+    // a single node's closure when an edge was clicked).
+    const pendingClickedId = state && state.pendingClickedNodeId;
+    const pendingClickedSet = state && state.pendingClickedActiveSet;
+    if (state) {
+        state.pendingClickedNodeId = null;
+        state.pendingClickedActiveSet = null;
+    }
+
+    if (pendingClickedId && pendingClickedSet) {
+        activeClickedNodeId = pendingClickedId;
+        if (state) state.activeClickedNodeId = pendingClickedId;
+        updateHighlightState(pendingClickedSet, pendingClickedId);
+    } else if (activeClickedNodeId && nodeElementsById.has(activeClickedNodeId)) {
         updateHighlightState(fullClosure(activeClickedNodeId), activeClickedNodeId);
     } else {
         activeClickedNodeId = null;
@@ -2541,7 +2573,17 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                 activeClickedNodeId = d.id;
                 if (state) state.activeClickedNodeId = d.id;
                 const allConnected = fullClosure(d.id);
-                updateHighlightState(allConnected, d.id);
+
+                // A click selects the full transitive closure, so open every
+                // folder/file that contains one of those nodes. Hover only opens
+                // the immediate neighbours; without this, a click would leave
+                // most of the selected (connected) nodes hidden inside closed
+                // boxes.
+                if (expandBoxesForHighlight(allConnected, d.id)) {
+                    renderForClickExpansion(d.id, allConnected);
+                } else {
+                    updateHighlightState(allConnected, d.id);
+                }
                 if (options && typeof options.onNodeClick === "function") {
                     options.onNodeClick(d.id, allConnected);
                 }
@@ -2616,6 +2658,40 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             updateHighlightState(null, null);
             if (options && typeof options.onNodeMouseOut === "function") {
                 options.onNodeMouseOut();
+            }
+        })
+        .on("click", function(event) {
+            const edgePath = event.target.closest(".graph-edge");
+            if (!edgePath) return;
+            const d = edgePath.__data__;
+            if (!d) return;
+            event.stopPropagation();
+
+            const origin = d.realFromId || d.fromId;
+            const target = d.realToId || d.toId;
+
+            // Clicking an edge selects everything connected to either of its
+            // endpoints, not just the one-hop neighbourhood shown on hover.
+            // The transitive closure of both endpoints covers callers and
+            // callees on both sides of the edge.
+            const allConnected = fullClosure(origin);
+            for (const id of fullClosure(target)) allConnected.add(id);
+            allConnected.add(origin);
+            allConnected.add(target);
+
+            activeClickedNodeId = origin;
+            if (state) state.activeClickedNodeId = origin;
+
+            // Open every folder/file that contains one of the connected nodes,
+            // so the selected edges end on visible nodes instead of closed
+            // boxes.
+            if (expandBoxesForHighlight(allConnected, origin)) {
+                renderForClickExpansion(origin, allConnected);
+            } else {
+                updateHighlightState(allConnected, origin);
+            }
+            if (options && typeof options.onNodeClick === "function") {
+                options.onNodeClick(origin, allConnected);
             }
         });
 
