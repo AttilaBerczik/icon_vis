@@ -1,0 +1,14 @@
+name: cpu-gcc
+description: CPU build profile (GCC/OpenMP, no OpenACC)
+fortran:
+  defines:
+    _OPENMP: 201511
+    __GNUC__: 1
+  undefines:
+    - _OPENACC
+cpp:
+  defines:
+    __cplusplus: 201703
+    __GNUC__: 1
+  undefines:
+    - _OPENACC

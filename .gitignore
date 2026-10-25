@@ -1,2 +1,10 @@
 node_modules/
 .DS_Store
+
+# Python extraction environment and generated artifacts
+.venv/
+__pycache__/
+*.pyc
+data_extraction/out/
+data_extraction/dataflow/out/
+data_extraction/libiconmath-main/

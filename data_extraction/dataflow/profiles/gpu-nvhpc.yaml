@@ -1,0 +1,16 @@
+name: gpu-nvhpc
+description: GPU build profile (NVHPC/OpenACC/OpenMP)
+fortran:
+  defines:
+    _OPENACC: 201711
+    _OPENMP: 201511
+    __NVCOMPILER: 1
+    __PGI: 1
+  undefines: []
+cpp:
+  defines:
+    __cplusplus: 201703
+    __NVCOMPILER: 1
+    __PGI: 1
+    _OPENACC: 201711
+  undefines: []
