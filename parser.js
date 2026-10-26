@@ -60,16 +60,43 @@ function parseDot(dotText) {
         }
     }
     finalizeEdge();
+    publishEdgeWeights(edgeWeights);
+    return { nodes, edges, edgeWeights, programIds: [] };
+}
 
+// Reads the networkx node-link JSON written by extract_graph.py into the same
+// shape as parseDot. For now only function nodes and call edges are used; the
+// label is built like the old one: "folder\nfile\nfunction".
+function parseGraphJson(data) {
+    const nodes = new Map();
+    const edges = new Map();
+    const edgeWeights = new Map();
+    // PROGRAM units, the counterpart of callGraph's "__MAIN__" node.
+    const programIds = [];
+
+    for (const n of data.nodes) {
+        if (n.kind !== "function") continue;
+        const fileName = n.file.split("/").pop();
+        nodes.set(n.id, `${n.folder}\\n${fileName}\\n${n.name}`);
+        if (n.program) programIds.push(n.id);
+    }
+    for (const e of data.edges) {
+        if (e.kind !== "call" || !nodes.has(e.source) || !nodes.has(e.target)) continue;
+        if (!edges.has(e.source)) edges.set(e.source, new Set());
+        edges.get(e.source).add(e.target);
+        edgeWeights.set(e.source + "|" + e.target, e.weight);
+    }
+    publishEdgeWeights(edgeWeights);
+    return { nodes, edges, edgeWeights, programIds };
+}
+
+// Expose globally so every graph renderer (main view + side-panel tabs) can
+// resolve an edge's call count without threading it through each call site.
+function publishEdgeWeights(edgeWeights) {
     let maxWeight = 1;
     for (const w of edgeWeights.values()) {
         if (w > maxWeight) maxWeight = w;
     }
-
-    // Expose globally so every graph renderer (main view + side-panel tabs) can
-    // resolve an edge's call count without threading it through each call site.
     window.globalEdgeWeightMap = edgeWeights;
     window.globalMaxEdgeWeight = maxWeight;
-
-    return { nodes, edges, edgeWeights };
 }

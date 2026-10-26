@@ -5,15 +5,53 @@ const ROOT_FUNCTION = "__MAIN__";
 // rebuilt after a folder/file is hidden or the "Show Hidden" option changes.
 let mainViewContext = null;
 
-fetch("callgraph_folders.dot")
-    .then((response) => {
-        if (!response.ok) {
-            throw new Error("Unable to load callgraph.dot");
+// The graph to show comes from ?graph=<id> (see GRAPH_SOURCES in constants.js).
+// Switching graphs reloads the page, so every view, colour map and side tab is
+// built from scratch for the new graph.
+function selectedGraphSource() {
+    const id = new URLSearchParams(window.location.search).get("graph");
+    return GRAPH_SOURCES.find((s) => s.id === id) || GRAPH_SOURCES[0];
+}
+
+function setupGraphSelect(current) {
+    const select = document.getElementById("graph-select");
+    if (!select) return;
+    for (const source of GRAPH_SOURCES) {
+        const option = document.createElement("option");
+        option.value = source.id;
+        option.textContent = source.label;
+        option.title = source.path;
+        select.appendChild(option);
+    }
+    select.value = current.id;
+    select.addEventListener("change", () => {
+        const params = new URLSearchParams(window.location.search);
+        params.set("graph", select.value);
+        window.location.search = params.toString();
+    });
+}
+
+function loadGraph(source) {
+    return fetch(source.path)
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`Unable to load ${source.path} (${response.status}).`);
+            }
+            return source.format === "json" ? response.json() : response.text();
+        })
+        .then((data) => (source.format === "json" ? parseGraphJson(data) : parseDot(data)));
+}
+
+const graphSource = selectedGraphSource();
+setupGraphSelect(graphSource);
+
+loadGraph(graphSource)
+    .then(({ nodes, edges, programIds }) => {
+        const rootId = findRoots(nodes, edges, programIds, graphSource.format);
+        if (!rootId) {
+            renderError(`Could not find ${ROOT_FILE}\\n${ROOT_FUNCTION} in ${graphSource.path}.`);
+            return;
         }
-        return response.text();
-    })
-    .then((dotText) => {
-        const { nodes, edges } = parseDot(dotText);
 
         // Keep pristine copies of nodes & edges for dynamic sub-graph views
         const pristineNodes = cloneNodes(nodes);
@@ -50,7 +88,7 @@ fetch("callgraph_folders.dot")
         // --- MAIN VIEW MODE ---
         // Always build the view from the pristine data: buildLevels mutates the
         // maps it is given (adds dummy nodes and rewrites the edge map).
-        renderMainMode(pristineNodes, pristineEdges);
+        renderMainMode(pristineNodes, pristineEdges, rootId);
     })
     .catch((error) => {
         renderError(error.message);
@@ -67,20 +105,58 @@ function findRootId(nodes) {
     return null;
 }
 
-function renderMainMode(pristineNodes, pristineEdges) {
-    const rootId = findRootId(pristineNodes);
-    if (!rootId) {
-        renderError("Could not find icon.f90\\n__MAIN__ in callgraph.dot.");
-        return;
-    }
+// Where the layout starts. Old DOT graphs: icon.f90 / __MAIN__. JSON graphs:
+// the PROGRAM in icon.f90, like the DOT graphs; libraries have no main
+// program, so every function nobody calls becomes a root (an array).
+function findRoots(nodes, edges, programIds, format) {
+    if (format !== "json") return findRootId(nodes);
+    const program = programIds.find((id) => parseNodeLabel(nodes.get(id)).file === ROOT_FILE);
+    return program || findEntryPoints(nodes, edges);
+}
 
+// Functions without callers, plus one function of every call cycle that is not
+// reachable from them, so each function appears in the layout.
+function findEntryPoints(nodes, edges) {
+    const called = new Set();
+    for (const targets of edges.values()) {
+        for (const t of targets) called.add(t);
+    }
+    const ids = Array.from(nodes.keys()).sort();
+    const roots = ids.filter((id) => !called.has(id));
+
+    const reached = new Set();
+    const visit = (start) => {
+        const todo = [start];
+        while (todo.length) {
+            const u = todo.pop();
+            if (reached.has(u)) continue;
+            reached.add(u);
+            for (const v of edges.get(u) || []) todo.push(v);
+        }
+    };
+    roots.forEach(visit);
+    for (const id of ids) {
+        if (!reached.has(id)) {
+            roots.push(id);
+            visit(id);
+        }
+    }
+    return roots;
+}
+
+function renderMainMode(pristineNodes, pristineEdges, rootId) {
     // Never let the hidden filter hide the root item: the graph would lose its
     // starting point. Both the context menu and this guard use mainRootInfo.
-    const rootLabel = parseNodeLabel(pristineNodes.get(rootId));
-    window.mainRootInfo = {
-        folder: rootLabel.folder,
-        fileKey: makeFileKey(rootLabel.folder, rootLabel.file)
-    };
+    // With several roots (no main program) nothing is protected.
+    if (Array.isArray(rootId)) {
+        window.mainRootInfo = null;
+    } else {
+        const rootLabel = parseNodeLabel(pristineNodes.get(rootId));
+        window.mainRootInfo = {
+            folder: rootLabel.folder,
+            fileKey: makeFileKey(rootLabel.folder, rootLabel.file)
+        };
+    }
 
     const nodes = cloneNodes(pristineNodes);
     const edges = cloneEdges(pristineEdges);

@@ -8,6 +8,17 @@
 // Units are SVG user units (roughly pixels at zoom = 1).
 // =============================================================================
 
+// --- Graph sources -----------------------------------------------------------
+// Call graphs offered in the dropdown in the header; the first one is the
+// default. format "dot": old callGraph output, "json": extract_graph.py output
+// (data_extraction/dependency and flow/generate_callgraph.sh -f NAME writes
+// output/NAME.json). Paths are relative to index.html.
+const GRAPH_SOURCES = [
+    { id: "icon-dot", label: "ICON (old DOT)", path: "callgraph_folders.dot", format: "dot" },
+    { id: "gridman", label: "gridman", path: "output/gridman.json", format: "json" },
+    { id: "libiconmath", label: "libiconmath", path: "output/libiconmath.json", format: "json" },
+];
+
 // --- Node boxes (the rectangle drawn for each function node) -----------------
 const NODE_PADDING_X = 16;   // horizontal padding around the label text (node width)
 const NODE_PADDING_Y = 12;   // vertical padding around the label text (node height)

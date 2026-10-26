@@ -51,6 +51,24 @@
             white-space: nowrap;
         }
 
+        .graph-select {
+            padding: 3px 6px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            color: #334155;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .graph-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
         /* --- Graph Search Bar --- */
         .graph-search-container {
             display: inline-flex;
@@ -1160,7 +1178,9 @@
             <div id="left-header-bar">
                 <!-- Main view header -->
                 <div id="main-header">
-                    <h1>icon.f90 Call Graph</h1>
+                    <h1>Call Graph</h1>
+                    <select id="graph-select" class="graph-select" title="Which call graph to show"
+                        aria-label="Call graph"></select>
                     <div id="graph-search-container" class="graph-search-container">
                         <div class="search-input-wrapper">
                             <span class="search-icon">🔍</span>

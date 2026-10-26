@@ -28,6 +28,7 @@ function makeFileKey(folder, file) {
     return file || folder || "";
 }
 
+// rootId may also be an array of roots (graphs without a single main program).
 function makeDAG(rootId, edges) {
     const dagEdges = new Map();
     const visited = new Set();
@@ -51,8 +52,14 @@ function makeDAG(rootId, edges) {
         }
         stack.delete(u);
     }
-    dfs(rootId);
+    for (const root of rootList(rootId)) {
+        if (!visited.has(root)) dfs(root);
+    }
     return dagEdges;
+}
+
+function rootList(rootId) {
+    return Array.isArray(rootId) ? rootId : [rootId];
 }
 
 function getPredecessors(V, dagEdges) {
@@ -191,10 +198,12 @@ function buildLevels(rootId, edges, nodes) {
     const layoutEdges = isHiddenVisibilityFilterActive()
         ? buildVisibleEdgeMap(edges, nodes)
         : edges;
-    const dagEdges = makeDAG(rootId, layoutEdges);
+    // With several roots, a root in a hidden folder/file is left out like any
+    // other hidden node (a single root is protected from hiding instead).
+    const roots = Array.isArray(rootId) ? rootId.filter((r) => !isGraphNodeHidden(r, nodes)) : rootId;
+    const dagEdges = makeDAG(roots, layoutEdges);
 
-    const V = new Set();
-    V.add(rootId);
+    const V = new Set(rootList(roots));
     for (const [u, targets] of dagEdges.entries()) {
         V.add(u);
         for (const v of targets) V.add(v);
