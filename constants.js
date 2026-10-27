@@ -19,6 +19,24 @@ const GRAPH_SOURCES = [
     { id: "libiconmath", label: "libiconmath", path: "output/libiconmath.json", format: "json" },
 ];
 
+// --- Data flow view (dataflow.js) ---------------------------------------------
+// How many flow/alias hops to follow from the focused function's variables,
+// upstream (callers) and downstream (callees).
+const FLOW_VIEW_DEPTH = 3;
+const FLOW_ROW_HEIGHT = 22;        // vertical space per variable row
+const FLOW_FUNCTION_WIDTH = 230;   // width of the function column boxes
+const FLOW_VARIABLE_WIDTH = 190;   // width of the variable boxes
+const FLOW_COLUMN_GAP = 260;       // horizontal gap between the two columns (room for edges)
+// Variable trace (click a variable in the data flow view): one column per call
+// level, up to FLOW_TRACE_DEPTH levels towards callers and towards callees.
+const FLOW_TRACE_DEPTH = 6;
+const FLOW_TRACE_NODE_WIDTH = 210;   // width of a variable box
+const FLOW_TRACE_NODE_HEIGHT = 34;   // height of a variable box (variable + function line)
+const FLOW_TRACE_NODE_GAP = 10;      // vertical space between boxes in a column
+const FLOW_TRACE_COLUMN_GAP = 90;    // horizontal space between columns (room for edges)
+const FLOW_INTENT_COLORS ={ in: "#2563eb", out: "#ea580c", inout: "#7c3aed", unknown: "#64748b" };
+const FLOW_ROLE_COLORS = { param: "#0f766e", local: "#64748b", module: "#b45309", external: "#be123c" };
+
 // --- Node boxes (the rectangle drawn for each function node) -----------------
 const NODE_PADDING_X = 16;   // horizontal padding around the label text (node width)
 const NODE_PADDING_Y = 12;   // vertical padding around the label text (node height)
@@ -41,6 +59,10 @@ const HAT_CORNER_RADIUS = 1.5;
 // --- Folder / file bounding boxes -------------------------------------------
 // BOX_PADDING is the gap between the nodes inside a box and the box border.
 const BOX_PADDING = 20;        // <-- padding around the nodes in folder/file boxes
+// BOX_MARGIN is the empty space kept between box borders: between a folder box
+// and the file boxes inside it, and between neighbouring boxes, so borders
+// never lie on top of each other.
+const BOX_MARGIN = 12;
 const FOLDER_BOX_PAD_TOP = 40; // extra room above nodes for the folder title
 const FOLDER_BOX_PAD_BOTTOM = 20;
 const FILE_BOX_PAD_TOP = 20;   // extra room above nodes for the file title
@@ -62,8 +84,10 @@ const MIN_LANE_GAP = 4;              // vertical space per edge lane
 // FILE_BOX_PAD_TOP above and FILE_BOX_PAD_BOTTOM below its nodes, so the gap
 // between two rows has to be at least their sum.
 const TIGHT_Y_SPACING = 64;          // minimum vertical gap between two levels (tight layout)
-const TIGHT_Y_SPACING_EXTRA = FILE_BOX_PAD_TOP + FILE_BOX_PAD_BOTTOM; // room for adjacent boxes' padding
-const COLUMN_SLOT_GAP = 40;          // gap between adjacent column slots
+const TIGHT_Y_SPACING_EXTRA = FILE_BOX_PAD_TOP + FILE_BOX_PAD_BOTTOM + BOX_MARGIN; // adjacent boxes' padding + margin
+// Gap between adjacent column slots. Each side's box reaches BOX_PADDING into
+// the gap, a folder box BOX_MARGIN further, and BOX_MARGIN stays empty between.
+const COLUMN_SLOT_GAP = 2 * (BOX_PADDING + BOX_MARGIN) + BOX_MARGIN;
 // Collapsed folder/file boxes have a fixed width so short names do not shrink
 // them and long names still get the same amount of readable text. The width
 // fits the toggle button plus up to COLLAPSED_LABEL_MAX_CHARS characters and a

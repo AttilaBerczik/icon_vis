@@ -468,9 +468,18 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     btnCallers.textContent = "▲ Callers";
     btnCallers.title = "Show only functions that call this node";
 
+    // Data flow is only known for JSON graphs (see buildFlowData in parser.js).
+    const btnDataFlow = window.flowData ? document.createElement("button") : null;
+    if (btnDataFlow) {
+        btnDataFlow.className = "tab-sub-btn";
+        btnDataFlow.textContent = "⇄ Data Flow";
+        btnDataFlow.title = "Functions and variables: which variables this function passes to which functions, in call order";
+    }
+
     navTabs.appendChild(btnCombined);
     navTabs.appendChild(btnCallees);
     navTabs.appendChild(btnCallers);
+    if (btnDataFlow) navTabs.appendChild(btnDataFlow);
     subHeader.appendChild(titleEl);
     subHeader.appendChild(navTabs);
     containerEl.appendChild(subHeader);
@@ -491,9 +500,14 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     callerViz.className = "viz-container tab-viz";
     callerViz.style.display = "none";
 
+    const dataFlowViz = document.createElement("div");
+    dataFlowViz.className = "viz-container tab-viz dataflow-viz";
+    dataFlowViz.style.display = "none";
+
     bodyEl.appendChild(combinedViz);
     bodyEl.appendChild(calleeViz);
     bodyEl.appendChild(callerViz);
+    bodyEl.appendChild(dataFlowViz);
     containerEl.appendChild(bodyEl);
 
     // Prepare graph data
@@ -583,18 +597,33 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
         }
     }
 
+    // --- 4. Data flow view (Lazy loaded on first click) ---
+    let hasRenderedDataFlow = false;
+
+    function renderDataFlowOnce() {
+        if (hasRenderedDataFlow) return;
+        hasRenderedDataFlow = true;
+        renderDataFlowView(nodeId, window.flowData, dataFlowViz);
+    }
+
     // Sub-tab switching
     function showSubTab(activeType) {
         btnCombined.classList.toggle("active", activeType === "combined");
         btnCallees.classList.toggle("active", activeType === "callees");
         btnCallers.classList.toggle("active", activeType === "callers");
+        if (btnDataFlow) btnDataFlow.classList.toggle("active", activeType === "dataflow");
 
         combinedViz.style.display = activeType === "combined" ? "block" : "none";
         calleeViz.style.display = activeType === "callees" ? "block" : "none";
         callerViz.style.display = activeType === "callers" ? "block" : "none";
+        dataFlowViz.style.display = activeType === "dataflow" ? "flex" : "none";
 
         if (activeType === "callees") renderCalleesOnce();
         if (activeType === "callers") renderCallersOnce();
+        if (activeType === "dataflow") {
+            renderDataFlowOnce();
+            return;                     // node selection only applies to the call graph views
+        }
 
         if (window.detailPanelManager && window.detailPanelManager.selectedNodeId) {
             const targetViz = activeType === "combined" ? combinedViz : (activeType === "callees" ? calleeViz : callerViz);
@@ -607,6 +636,7 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     btnCombined.addEventListener("click", () => showSubTab("combined"));
     btnCallees.addEventListener("click", () => showSubTab("callees"));
     btnCallers.addEventListener("click", () => showSubTab("callers"));
+    if (btnDataFlow) btnDataFlow.addEventListener("click", () => showSubTab("dataflow"));
 
     return { combinedState, getCalleeState: () => calleeState, getCallerState: () => callerState };
 }

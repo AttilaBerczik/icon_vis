@@ -1000,12 +1000,13 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         });
         if (folderMinX === Infinity) return;
 
+        // BOX_MARGIN keeps the folder border apart from its file boxes' borders.
         folderBoxData.push({
             folder,
-            x: folderMinX - BOX_PADDING,
+            x: folderMinX - BOX_PADDING - BOX_MARGIN,
             y: yRange.minY - FOLDER_BOX_PAD_TOP,
-            width: folderMaxX - folderMinX + 2 * BOX_PADDING,
-            height: yRange.maxY - yRange.minY + FOLDER_BOX_PAD_TOP + FOLDER_BOX_PAD_BOTTOM,
+            width: folderMaxX - folderMinX + 2 * (BOX_PADDING + BOX_MARGIN),
+            height: yRange.maxY - yRange.minY + FOLDER_BOX_PAD_TOP + FOLDER_BOX_PAD_BOTTOM + BOX_MARGIN,
             color: getFolderColor(folder),
             collapsed: isCollapsed
         });

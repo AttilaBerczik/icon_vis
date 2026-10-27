@@ -993,6 +993,179 @@
         }
 
         /* --- Empty state message --- */
+        /* --- Data flow view (dataflow.js) --- */
+        .dataflow-viz {
+            flex-direction: column;
+        }
+
+        .dataflow-legend {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 12px;
+            font-size: 11px;
+            color: #475569;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+
+        .dataflow-legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .dataflow-legend i {
+            width: 14px;
+            height: 3px;
+            border-radius: 2px;
+        }
+
+        .dataflow-legend b {
+            width: 4px;
+            height: 12px;
+            border-radius: 1px;
+        }
+
+        .dataflow-legend u {
+            width: 14px;
+            border-top: 2px dashed #94a3b8;
+        }
+
+        .dataflow-legend-sep {
+            width: 1px;
+            height: 12px;
+            background: #cbd5e1;
+        }
+
+        .dataflow-scroll {
+            flex: 1;
+            overflow: auto;
+        }
+
+        .df-function rect {
+            fill: #f1f5f9;
+            stroke: #94a3b8;
+        }
+
+        .df-function.df-focus rect {
+            fill: #dbeafe;
+            stroke: #2563eb;
+            stroke-width: 2;
+        }
+
+        .df-function.df-module rect {
+            fill: #fffbeb;
+            stroke: #d97706;
+            stroke-dasharray: 4 3;
+        }
+
+        .df-fn-name {
+            font-size: 12px;
+            font-weight: 600;
+            fill: #1e293b;
+        }
+
+        .df-fn-file {
+            font-size: 10px;
+            fill: #64748b;
+        }
+
+        .df-variable rect:first-child {
+            fill: #ffffff;
+            stroke: #cbd5e1;
+        }
+
+        .df-var-name {
+            font-size: 11px;
+            fill: #1e293b;
+        }
+
+        .df-var-tag {
+            font-size: 9px;
+            fill: #64748b;
+            text-anchor: end;
+        }
+
+        .df-owns {
+            stroke: #cbd5e1;
+            stroke-width: 1;
+        }
+
+        .df-flow {
+            fill: none;
+            opacity: 0.75;
+        }
+
+        .df-alias {
+            fill: none;
+            stroke: #94a3b8;
+            stroke-width: 1.5;
+            stroke-dasharray: 4 3;
+        }
+
+        .dataflow-hint {
+            font-style: italic;
+            color: #94a3b8;
+        }
+
+        .dataflow-trace-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #475569;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .dataflow-trace-bar select {
+            font-size: 12px;
+            max-width: 320px;
+        }
+
+        .df-trace-column {
+            font-size: 10px;
+            fill: #94a3b8;
+            text-anchor: middle;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .df-trace-node.df-focus rect:first-child {
+            fill: #dbeafe;
+            stroke: #2563eb;
+            stroke-width: 2;
+        }
+
+        .df-edge-label {
+            font-size: 10px;
+            font-family: monospace;
+            fill: #475569;
+            text-anchor: end;
+            paint-order: stroke;
+            stroke: #ffffff;
+            stroke-width: 3px;
+        }
+
+        .df-dimmed .df-edge-label,
+        .df-dimmed .df-flow,
+        .df-dimmed .df-alias,
+        .df-dimmed .df-owns,
+        .df-dimmed .df-variable,
+        .df-dimmed .df-function {
+            opacity: 0.12;
+        }
+
+        .df-dimmed .df-active {
+            opacity: 1;
+        }
+
+        .df-dimmed .df-variable.df-active rect:first-child {
+            stroke: #1e293b;
+        }
+
         .empty-message {
             display: flex;
             align-items: center;
@@ -1273,6 +1446,7 @@
     <script src="layout.js"></script>
     <script src="render.js"></script>
     <script src="panel.js"></script>
+    <script src="dataflow.js"></script>
     <script src="main.js"></script>
 </body>
 

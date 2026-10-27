@@ -13473,6 +13473,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    894
+   ],
    "cross_lang": true
   },
   {
@@ -13508,7 +13511,10 @@
    "target": "bindings/fortran/gridman.F90:release_logical_buffers",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    954
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:destroy",
@@ -13516,6 +13522,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    949
+   ],
    "cross_lang": true
   },
   {
@@ -13549,6 +13558,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    961
+   ],
    "type_bound": true
   },
   {
@@ -13624,7 +13636,10 @@
    "target": "bindings/fortran/gridman.F90:fill_double",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    341
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_array_double_1d",
@@ -13727,7 +13742,10 @@
    "target": "bindings/fortran/gridman.F90:fill_double",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    355
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_array_double_2d",
@@ -13830,7 +13848,10 @@
    "target": "bindings/fortran/gridman.F90:fill_double",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    369
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_array_double_3d",
@@ -13933,7 +13954,10 @@
    "target": "bindings/fortran/gridman.F90:fill_int",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    417
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_array_int_1d",
@@ -14036,7 +14060,10 @@
    "target": "bindings/fortran/gridman.F90:fill_int",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    431
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_array_int_2d",
@@ -14139,7 +14166,10 @@
    "target": "bindings/fortran/gridman.F90:fill_int",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    445
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_array_int_3d",
@@ -14284,7 +14314,10 @@
    "target": "bindings/fortran/gridman.F90:invalid_argument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    768
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_blocked_index",
@@ -14304,14 +14337,22 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    764
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_blocked_index",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    764,
+    768,
+    785
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_blocked_index",
@@ -14319,6 +14360,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    782
+   ],
    "cross_lang": true
   },
   {
@@ -14391,7 +14435,10 @@
    "target": "bindings/fortran/gridman.F90:fill_blocked_index",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    705
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_blocked_index_array_1d",
@@ -14520,7 +14567,10 @@
    "target": "bindings/fortran/gridman.F90:fill_blocked_index",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    724
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_blocked_index_array_2d",
@@ -14649,7 +14699,10 @@
    "target": "bindings/fortran/gridman.F90:fill_blocked_index",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    743
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_blocked_index_array_3d",
@@ -14834,7 +14887,10 @@
    "target": "bindings/fortran/gridman.F90:invalid_argument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    389
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_double",
@@ -14854,14 +14910,22 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    385
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_double",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    385,
+    389,
+    403
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_double",
@@ -14869,6 +14933,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    398
+   ],
    "cross_lang": true
   },
   {
@@ -14984,7 +15051,10 @@
    "target": "bindings/fortran/gridman.F90:invalid_argument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    465
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_int",
@@ -15004,14 +15074,22 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    461
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_int",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    461,
+    465,
+    479
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_int",
@@ -15019,6 +15097,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    474
+   ],
    "cross_lang": true
   },
   {
@@ -15113,7 +15194,10 @@
    "target": "bindings/fortran/gridman.F90:fill_logical_buffer",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    494
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_array_1d",
@@ -15217,7 +15301,10 @@
    "target": "bindings/fortran/gridman.F90:fill_logical_buffer",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    507
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_array_2d",
@@ -15321,7 +15408,10 @@
    "target": "bindings/fortran/gridman.F90:fill_logical_buffer",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    520
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_array_3d",
@@ -15432,14 +15522,20 @@
    "target": "bindings/fortran/gridman.F90:invalid_argument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    542
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_buffer",
    "target": "bindings/fortran/gridman.F90:logical_buffer_of",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    540
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_buffer",
@@ -15460,14 +15556,22 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    537
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_buffer",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    537,
+    542,
+    552
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_logical_buffer",
@@ -15475,6 +15579,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    547
+   ],
    "cross_lang": true
   },
   {
@@ -15625,7 +15732,10 @@
    "target": "bindings/fortran/gridman.F90:invalid_argument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    575
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_subset_ranges",
@@ -15645,14 +15755,22 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    571
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_subset_ranges",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    571,
+    575,
+    590
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:fill_subset_ranges",
@@ -15660,6 +15778,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    585
+   ],
    "cross_lang": true
   },
   {
@@ -15781,14 +15902,21 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    635
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_array_shape",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    635,
+    639
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_array_shape",
@@ -15796,6 +15924,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    638
+   ],
    "cross_lang": true
   },
   {
@@ -15950,14 +16081,21 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    605
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_array_size",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    605,
+    614
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_array_size",
@@ -15965,6 +16103,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    608
+   ],
    "cross_lang": true
   },
   {
@@ -16083,14 +16224,21 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    653
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_geometry_info",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    653,
+    656
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_geometry_info",
@@ -16111,6 +16259,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    656
+   ],
    "cross_lang": true
   },
   {
@@ -16191,14 +16342,21 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    667
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_grid_uuid",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    667,
+    670
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_grid_uuid",
@@ -16206,6 +16364,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    670
+   ],
    "cross_lang": true
   },
   {
@@ -16300,14 +16461,21 @@
    "target": "bindings/fortran/gridman.F90:not_set_up",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    684
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_scalar",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    684,
+    688
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:get_scalar",
@@ -16315,6 +16483,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    687
+   ],
    "cross_lang": true
   },
   {
@@ -16477,7 +16648,10 @@
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    823
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:gridman_detect_grid_convention",
@@ -16485,6 +16659,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    821
+   ],
    "cross_lang": true
   },
   {
@@ -16542,7 +16719,10 @@
    "target": "bindings/fortran/gridman.F90:c_strlen",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    844
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:gridman_error_message",
@@ -16557,6 +16737,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    843
+   ],
    "cross_lang": true
   },
   {
@@ -16590,7 +16773,11 @@
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    798,
+    800
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:gridman_start_mpi",
@@ -16598,6 +16785,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    800
+   ],
    "cross_lang": true
   },
   {
@@ -16606,6 +16796,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    798
+   ],
    "cross_lang": true
   },
   {
@@ -16633,7 +16826,10 @@
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    831
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:gridman_stop_mpi",
@@ -16641,6 +16837,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    831
+   ],
    "cross_lang": true
   },
   {
@@ -16668,6 +16867,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    875
+   ],
    "cross_lang": true
   },
   {
@@ -16751,6 +16953,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    883
+   ],
    "cross_lang": true
   },
   {
@@ -16779,7 +16984,10 @@
    "target": "bindings/fortran/gridman.F90:gridman_error_message",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    865
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:report",
@@ -16808,6 +17016,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    865
+   ],
    "cross_lang": true
   },
   {
@@ -16829,14 +17040,22 @@
    "target": "bindings/fortran/gridman.F90:release_logical_buffers",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    324
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:setup_grid_and_decompose",
    "target": "bindings/fortran/gridman.F90:report",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    287,
+    311,
+    319
+   ]
   },
   {
    "source": "bindings/fortran/gridman.F90:setup_grid_and_decompose",
@@ -17019,6 +17238,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    309
+   ],
    "cross_lang": true
   },
   {
@@ -17027,6 +17249,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    316
+   ],
    "cross_lang": true
   },
   {
@@ -17035,6 +17260,9 @@
    "key": "call",
    "kind": "call",
    "weight": 1,
+   "lines": [
+    285
+   ],
    "cross_lang": true
   },
   {
@@ -17148,7 +17376,10 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::fail",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    79
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
@@ -17237,7 +17468,10 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    357
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_detect_grid_convention",
@@ -17291,14 +17525,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    208
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_fill_array_double",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    209
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_fill_array_double",
@@ -17376,14 +17616,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    226
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_fill_array_int",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    227
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_fill_array_int",
@@ -17461,14 +17707,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    243
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_fill_blocked_index_array",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    244
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_fill_blocked_index_array",
@@ -17553,14 +17805,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    271
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_array_shape",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    272
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_array_shape",
@@ -17638,14 +17896,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    260
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_array_size",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    261
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_array_size",
@@ -17730,14 +17994,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    293
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_geometry_info",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    294
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_geometry_info",
@@ -17814,14 +18084,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    319
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_grid_uuid",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    320
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_grid_uuid",
@@ -17885,14 +18161,20 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::checkSetUp",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    282
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_scalar_int",
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::nullArgument",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    283
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_get_scalar_int",
@@ -17963,7 +18245,10 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::defaultSetupOptions",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    343
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_mesh_setup_grid_and_decompose",
@@ -18005,7 +18290,10 @@
    "target": "cpp/bindings/c/gridman_c_api.cpp:(anonymous)::defaultSetupOptions",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    330
+   ]
   },
   {
    "source": "cpp/bindings/c/gridman_c_api.cpp:gridman_setup_options_init",
@@ -18054,7 +18342,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::check",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    86
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::flip",
@@ -18087,7 +18378,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::Bitset32",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    120
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator<<",
@@ -18101,7 +18395,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator<<=",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    120
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator<<=",
@@ -18115,7 +18412,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::Bitset32",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    123
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator>>",
@@ -18129,7 +18429,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator>>=",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    123
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator>>=",
@@ -18164,21 +18467,30 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::Bitset32",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    107
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator~",
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::flip",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    107
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::reset",
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::check",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    75
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::reset",
@@ -18192,7 +18504,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::set",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    76
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::reset::pos",
@@ -18223,7 +18538,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::check",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    61
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::set",
@@ -18256,14 +18574,20 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::check",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    40
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::test",
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator[]",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    41
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::test",
@@ -18289,7 +18613,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator[]",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    139
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::to_string",
@@ -18310,14 +18637,20 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::Bitset32",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    126
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::operator&",
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator&=",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    126
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::operator&",
@@ -18350,14 +18683,20 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::Bitset32",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    128
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::operator^",
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator^=",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    128
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::operator^",
@@ -18390,14 +18729,20 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::Bitset32",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    127
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::operator|",
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::operator|=",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    127
+   ]
   },
   {
    "source": "cpp/core/gridman/Bitset32.hpp:gridman::operator|",
@@ -18444,7 +18789,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::to_string",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    238
+   ]
   },
   {
    "source": "cpp/core/gridman/DecompositionGenerator.cpp:(anonymous)::throwNoPivot",
@@ -18493,7 +18841,10 @@
    "target": "cpp/core/gridman/Glb2LocIndexLookUp.hpp:gridman::Glb2LocIndexLookup::findGlobal",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    25
+   ]
   },
   {
    "source": "cpp/core/gridman/Glb2LocIndexLookUp.hpp:gridman::Glb2LocIndexLookup::findExactLocalIndex::vec",
@@ -18729,21 +19080,30 @@
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataArray::checksum",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    58
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataArray::verify",
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataArray::checksum",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    65
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataArray::verify",
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataArray::owned",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    68
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory",
@@ -18799,21 +19159,32 @@
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::ensure",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    640
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::compute",
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::fillFromCache",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    787,
+    788
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::compute",
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::sizeOf",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    771,
+    783
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::compute::content",
@@ -18884,21 +19255,30 @@
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::isCached",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    709
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::ensure",
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::resolveDependencies",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    713
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::ensure",
    "target": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::sizeOf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    714
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::ensure::content",
@@ -18953,7 +19333,10 @@
    "target": "cpp/core/gridman/Bitset32.hpp:gridman::Bitset32::to_string",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    754
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::GridDataFactory::fillFromCache",
@@ -19091,7 +19474,10 @@
    "target": "cpp/core/gridman/GridData.hpp:gridman::dispatchOneGridData",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    862
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::dispatchGridData::f",
@@ -19124,14 +19510,20 @@
    "target": "cpp/core/gridman/GridData.hpp:gridman::isPublicGridData",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    826
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::dispatchOneGridData",
    "target": "cpp/core/gridman/GridData.hpp:gridman::matchesGridData",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    827
+   ]
   },
   {
    "source": "cpp/core/gridman/GridData.hpp:gridman::matchesGridData",
@@ -19306,7 +19698,11 @@
    "target": "cpp/core/gridman/ImplConstants.hpp:gridman::GridConvention::has",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    171,
+    172
+   ]
   },
   {
    "source": "cpp/core/gridman/ImplConstants.hpp:gridman::GridConvention::edgesOfVertexOrder::convention",
@@ -19364,7 +19760,12 @@
    "target": "cpp/core/gridman/ImplConstants.hpp:gridman::GridConvention::has",
    "key": "call",
    "kind": "call",
-   "weight": 6
+   "weight": 6,
+   "lines": [
+    159,
+    160,
+    161
+   ]
   },
   {
    "source": "cpp/core/gridman/ImplConstants.hpp:gridman::GridConvention::isValid",
@@ -19506,7 +19907,11 @@
    "target": "cpp/core/gridman/ImplConstants.hpp:gridman::GridConvention::has",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    165,
+    166
+   ]
   },
   {
    "source": "cpp/core/gridman/ImplConstants.hpp:gridman::GridConvention::vertexFanOrder",
@@ -19599,14 +20004,20 @@
    "target": "cpp/core/gridman/MPIUtils.cpp:MPIUtils::getCommSize",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    167
+   ]
   },
   {
    "source": "cpp/core/gridman/MPIUtils.hpp:MPIUtils::agreeOnFailure",
    "target": "cpp/core/gridman/MPIUtils.cpp:MPIUtils::getMyRank",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    168
+   ]
   },
   {
    "source": "cpp/core/gridman/MPIUtils.hpp:MPIUtils::agreeOnFailure",
@@ -19620,7 +20031,10 @@
    "target": "cpp/core/gridman/MPIUtils.cpp:MPIUtils::getCommSize",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    118
+   ]
   },
   {
    "source": "cpp/core/gridman/MPIUtils.hpp:MPIUtils::exchangeRecords",
@@ -19669,14 +20083,20 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::arc_length_on_unitsphere",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    247
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::arc_length",
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::gc2cc",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    247
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::arc_length::v1",
@@ -19728,14 +20148,20 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cross",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    242
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::arc_length_on_unitsphere",
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::dot",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    243
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::arc_length_on_unitsphere::c1",
@@ -19834,7 +20260,10 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::ccw_spherical",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    290
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::ccw_spherical",
@@ -19862,14 +20291,20 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::dot",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    282
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::ccw_spherical",
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::gc2cc",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    290
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::ccw_spherical::v1",
@@ -19924,7 +20359,10 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cc2gc",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    181
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cell_circumcenter",
@@ -19959,14 +20397,20 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cross",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    173
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cell_circumcenter",
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::normalize",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    173
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cell_circumcenter::cc0",
@@ -20009,7 +20453,11 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::CartesianCoordinates::operator-",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    213,
+    214
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::circum_center",
@@ -20058,21 +20506,30 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::cross",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    215
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::circum_center",
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::dot",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    216
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::circum_center",
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::normalize",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    221
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::circum_center::cu",
@@ -20212,7 +20669,10 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::normalized_lat",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    324
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::fxp_lat::lat",
@@ -20238,7 +20698,10 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::normalized_lon",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    340
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::fxp_lon::lon",
@@ -20298,7 +20761,10 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::normalize",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    231
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::sphere_cartesian_midpoint",
@@ -20319,7 +20785,12 @@
    "target": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::arc_length_on_unitsphere",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    253,
+    254,
+    255
+   ]
   },
   {
    "source": "cpp/core/gridman/MathUtils.hpp:gridman::MathUtils::sphere_triangle_area_Huilier",
@@ -20496,14 +20967,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    180
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::addDim",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    180
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::addVar",
@@ -20531,14 +21008,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    186
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::addVar",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    185
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::attLen",
@@ -20559,14 +21042,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    112
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::attLen",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    111
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
@@ -20580,7 +21069,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    98
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::dimLen",
@@ -20601,7 +21093,11 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    99,
+    100
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::dimLen::ctx",
@@ -20621,14 +21117,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    194
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getAtt",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    124
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getAtt",
@@ -20663,7 +21165,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    124
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getAtt::status",
@@ -20682,7 +21187,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    128
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getAttText",
@@ -20710,7 +21218,12 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 3
+   "weight": 3,
+   "lines": [
+    131,
+    134,
+    140
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getAttText::ctx",
@@ -20766,14 +21279,22 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varContext",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    158,
+    175
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getVar",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    158,
+    175
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::getVar::status",
@@ -20834,7 +21355,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    191
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::putAtt",
@@ -20876,7 +21400,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    190
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::putVar",
@@ -20904,14 +21431,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varContext",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    207
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::putVar",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    207
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::putVar::status",
@@ -20942,7 +21475,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    217
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varContext",
@@ -20956,7 +21492,11 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varContext",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    79,
+    81
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varDimLen",
@@ -20977,7 +21517,11 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    79,
+    81
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varDimLen::varid",
@@ -20997,14 +21541,21 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::context",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    58,
+    66
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varId",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varId",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    63
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varId",
@@ -21032,14 +21583,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varNDims",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    64
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varId",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    58
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varId::name",
@@ -21070,7 +21627,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varContext",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    73
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varNDims",
@@ -21084,7 +21644,10 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::checkNetcdf",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    73
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varNDims::varid",
@@ -21103,14 +21666,20 @@
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varDimLen",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    87
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varSize",
    "target": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varNDims",
    "key": "call",
    "kind": "call",
-   "weight": 1
+   "weight": 1,
+   "lines": [
+    87
+   ]
   },
   {
    "source": "cpp/core/gridman/NetcdfFile.hpp:gridman::NetcdfFile::varSize",
@@ -21216,7 +21785,11 @@
    "target": "cpp/core/gridman/PPMUtils.hpp:gridman::PPMUtils::distArrayGetImpl",
    "key": "call",
    "kind": "call",
-   "weight": 2
+   "weight": 2,
+   "lines": [
+    133,
+    148
+   ]
   },
   {
    "source": "cpp/core/gridman/PPMUtils.hpp:gridman::PPMUtils::distArrayGet::array",

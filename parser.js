@@ -87,7 +87,39 @@ function parseGraphJson(data) {
         edgeWeights.set(e.source + "|" + e.target, e.weight);
     }
     publishEdgeWeights(edgeWeights);
+    window.flowData = buildFlowData(data);
     return { nodes, edges, edgeWeights, programIds };
+}
+
+// Variables and how data moves between them, for the data flow view
+// (dataflow.js). Only the JSON format has this; for DOT graphs window.flowData
+// stays undefined and the view is not offered.
+function buildFlowData(data) {
+    const flow = {
+        functions: new Map(),   // function id -> JSON node
+        variables: new Map(),   // variable id -> JSON node
+        owned: new Map(),       // function id -> [variable id] (has_var edges)
+        out: new Map(),         // variable id -> [flow/alias edge]
+        in: new Map(),          // variable id -> [flow/alias edge]
+        callLine: new Map(),    // "caller|callee" -> first line of the call in the caller
+    };
+    const push = (map, key, value) => {
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(value);
+    };
+    for (const n of data.nodes) {
+        if (n.kind === "function") flow.functions.set(n.id, n);
+        if (n.kind === "variable") flow.variables.set(n.id, n);
+    }
+    for (const e of data.edges) {
+        if (e.kind === "has_var") push(flow.owned, e.source, e.target);
+        if (e.kind === "flow" || e.kind === "alias") {
+            push(flow.out, e.source, e);
+            push(flow.in, e.target, e);
+        }
+        if (e.kind === "call" && e.lines) flow.callLine.set(e.source + "|" + e.target, Math.min(...e.lines));
+    }
+    return flow;
 }
 
 // Expose globally so every graph renderer (main view + side-panel tabs) can
