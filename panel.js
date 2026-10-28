@@ -132,7 +132,9 @@ class DetailPanelManager {
 
         const closeBtn = document.createElement("span");
         closeBtn.className = "detail-tab-close";
-        closeBtn.innerHTML = "&times;";
+        closeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="M6 6l12 12M18 6 6 18"></path></svg>`;
         closeBtn.title = "Close Tab";
         closeBtn.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -191,6 +193,100 @@ class DetailPanelManager {
         // Scroll tab bar to make new tab visible
         tabBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
 
+        return tabId;
+    }
+
+    /**
+     * Open (or focus) the Lifecycle tab for a precomputed data trace.
+     * The tab is independent of function tabs: it lives in the same side panel
+     * but has no focused node, so it never changes the main view's role colours.
+     */
+    openLifecycle(trace, view, paramEntity, titleOverride) {
+        if (!trace) return null;
+        const key = `lifecycle:${trace.id}:${paramEntity || ""}:${view ? view.mode : "full"}`;
+        const existing = this.tabs.find(t => t.lifecycleKey === key);
+        if (existing) {
+            this.switchTab(existing.id);
+            return existing.id;
+        }
+
+        if (this.detailPanel.style.display === "none" || !this.detailPanel.style.display) {
+            this.detailPanel.style.display = "flex";
+            this.resizer.style.display = "block";
+            if (!this.detailPanel.style.width) {
+                const initialWidth = Math.min(this.defaultPanelWidth, window.innerWidth * 0.45);
+                this.detailPanel.style.flex = `0 0 ${initialWidth}px`;
+                this.detailPanel.style.width = `${initialWidth}px`;
+            }
+        }
+
+        const tabId = "tab_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+        const label = titleOverride || trace.entity || "Lifecycle";
+        const title = shortLifecycleName(label);
+
+        const tabBtn = document.createElement("div");
+        tabBtn.className = "detail-tab";
+        tabBtn.title = `Lifecycle · ${label}`;
+        tabBtn.dataset.tabId = tabId;
+        const kindIcon = document.createElement("span");
+        kindIcon.className = "tab-kind-icon";
+        kindIcon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="M3 12h4l2-7 4 14 2-7h6"></path></svg>`;
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "detail-tab-title";
+        titleSpan.textContent = title;
+        const closeBtn = document.createElement("span");
+        closeBtn.className = "detail-tab-close";
+        closeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="M6 6l12 12M18 6 6 18"></path></svg>`;
+        closeBtn.title = "Close Tab";
+        closeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.closeTab(tabId);
+        });
+        tabBtn.appendChild(kindIcon);
+        tabBtn.appendChild(titleSpan);
+        tabBtn.appendChild(closeBtn);
+        tabBtn.addEventListener("click", () => this.switchTab(tabId));
+        tabBtn.addEventListener("auxclick", (e) => {
+            if (e.button === 1) {
+                e.preventDefault();
+                this.closeTab(tabId);
+            }
+        });
+
+        this.tabs.forEach(t => {
+            t.tabBtn.classList.remove("active");
+            t.contentContainer.style.display = "none";
+        });
+        tabBtn.classList.add("active");
+        this.tabBar.appendChild(tabBtn);
+
+        const contentContainer = document.createElement("div");
+        contentContainer.className = "tab-content-container lifecycle-content";
+        contentContainer.dataset.tabId = tabId;
+        contentContainer.style.display = "flex";
+        this.contentArea.appendChild(contentContainer);
+
+        renderLifecycleInContainer(trace, view, paramEntity, contentContainer, this.nodes);
+
+        const tabObj = {
+            id: tabId,
+            nodeId: null,
+            type: "lifecycle",
+            lifecycleKey: key,
+            lifecycle: { trace, view, paramEntity, title: label },
+            displayName: title,
+            fullTitle: `Lifecycle · ${label}`,
+            tabBtn,
+            contentContainer
+        };
+        this.tabs.push(tabObj);
+        this.activeTabId = tabId;
+        this.notifyActiveNodeChanged(null);
+        tabBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
         return tabId;
     }
 
@@ -326,8 +422,14 @@ class DetailPanelManager {
     refreshVisibility() {
         if (!this.tabs.length) return;
 
-        const tabNodeIds = this.tabs.map(t => t.nodeId);
-        const activeNodeId = this.getActiveNodeId();
+        const descriptors = this.tabs.map(t => ({
+            type: t.type || "function",
+            nodeId: t.nodeId,
+            lifecycle: t.lifecycle || null,
+            lifecycleKey: t.lifecycleKey || null
+        }));
+        const activeTab = this.tabs.find(t => t.id === this.activeTabId);
+        const activeKey = activeTab ? (activeTab.lifecycleKey || activeTab.nodeId) : null;
 
         this.tabs.forEach(tab => {
             if (tab.tabBtn && tab.tabBtn.parentNode) {
@@ -341,9 +443,16 @@ class DetailPanelManager {
         this.activeTabId = null;
 
         let activeTabId = null;
-        tabNodeIds.forEach(nodeId => {
-            const tabId = this.openTab(nodeId);
-            if (tabId && nodeId === activeNodeId) activeTabId = tabId;
+        descriptors.forEach(desc => {
+            let tabId = null;
+            if (desc.type === "lifecycle" && desc.lifecycle) {
+                tabId = this.openLifecycle(desc.lifecycle.trace, desc.lifecycle.view,
+                    desc.lifecycle.paramEntity, desc.lifecycle.title);
+                if (tabId && desc.lifecycleKey === activeKey) activeTabId = tabId;
+            } else {
+                tabId = this.openTab(desc.nodeId);
+                if (tabId && desc.nodeId === activeKey) activeTabId = tabId;
+            }
         });
 
         if (activeTabId) this.switchTab(activeTabId);
@@ -455,17 +564,24 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
 
     const btnCombined = document.createElement("button");
     btnCombined.className = "tab-sub-btn active";
-    btnCombined.textContent = "⇅ Combined";
+    btnCombined.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+        + `<path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5"></path>`
+        + `<path d="m3 16 9 5 9-5"></path></svg><span>Combined</span>`;
     btnCombined.title = "Show both Callers (above) and Callees (below)";
 
     const btnCallees = document.createElement("button");
     btnCallees.className = "tab-sub-btn";
-    btnCallees.textContent = "▼ Callees";
+    btnCallees.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+        + `<path d="M12 4v14"></path><path d="m6 12 6 6 6-6"></path></svg><span>Callees</span>`;
     btnCallees.title = "Show only functions called by this node";
 
     const btnCallers = document.createElement("button");
     btnCallers.className = "tab-sub-btn";
-    btnCallers.textContent = "▲ Callers";
+    btnCallers.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+        + `<path d="M12 20V6"></path><path d="m6 12 6-6 6 6"></path></svg><span>Callers</span>`;
     btnCallers.title = "Show only functions that call this node";
 
     navTabs.appendChild(btnCombined);
@@ -611,5 +727,281 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
     return { combinedState, getCalleeState: () => calleeState, getCallerState: () => callerState };
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle tab
+// ---------------------------------------------------------------------------
+
+const LIFECYCLE_ROLES = [
+    {
+        key: "create", bit: 1, label: "Create", cls: "role-create",
+        glyph: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.4l6.1-.9L12 3Z"></path></svg>`
+    },
+    {
+        key: "pass", bit: 8, label: "Pass", cls: "role-pass",
+        glyph: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>`
+    },
+    {
+        key: "write", bit: 2, label: "Write", cls: "role-write",
+        glyph: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="M12 20h9"></path>`
+            + `<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"></path></svg>`
+    },
+    {
+        key: "read", bit: 4, label: "Read", cls: "role-read",
+        glyph: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+            + `<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"></path>`
+            + `<circle cx="12" cy="12" r="3"></circle></svg>`
+    }
+];
+
+function shortLifecycleName(text) {
+    const t = String(text || "");
+    const parts = t.split(/[%/]/);
+    return parts.length > 1 ? parts.slice(-2).join("%") : t;
+}
+
+function lifecycleFnInfo(nodeId, nodes) {
+    const raw = nodes && nodes.get(nodeId);
+    const info = parseNodeLabel(raw == null ? String(nodeId) : raw);
+    return {
+        name: info.lines[info.lines.length - 1] || String(nodeId),
+        file: info.file || "",
+        folder: info.folder || ""
+    };
+}
+
+function shortEntityName(entity) {
+    if (!entity) return "";
+    return String(entity).replace(/^(field|param|var|local|this):/, "");
+}
+
+function lifecycleEntries(trace) {
+    const entities = trace.entities || [];
+    const vias = trace.vias || ["assign", "expr", "allocate", "read", "copy", "call", "pass"];
+    const rows = [];
+    for (const ev of trace.events || []) {
+        rows.push({
+            fn: ev[0],
+            line: ev[1],
+            mask: ev[2],
+            via: vias[ev[3]] || "assign",
+            entity: ev[4] >= 0 ? entities[ev[4]] : "",
+            otherFn: ev[5] >= 0 ? ev[5] : null,
+            otherEntity: ev[6] >= 0 ? entities[ev[6]] : ""
+        });
+    }
+    return rows;
+}
+
+function centerNodeOnGraph(nodeId) {
+    const container = document.getElementById("visualization");
+    if (!container) return;
+    if (typeof container.centerNode === "function") container.centerNode(nodeId, 0.9);
+    if (typeof container.selectNode === "function") container.selectNode(nodeId);
+}
+
+function lifecycleRow(entry, nodes, trace) {
+    const row = document.createElement("div");
+    row.className = "lifecycle-row";
+    row.title = "Click to centre this function on the graph";
+    row.addEventListener("click", () => centerNodeOnGraph(entry.fn));
+
+    const glyphs = document.createElement("span");
+    glyphs.className = "lifecycle-glyphs";
+    for (const role of LIFECYCLE_ROLES) {
+        if (entry.mask & role.bit) {
+            const g = document.createElement("span");
+            g.className = `lifecycle-glyph ${role.cls}`;
+            g.innerHTML = role.glyph;
+            g.title = role.label;
+            glyphs.appendChild(g);
+        }
+    }
+    row.appendChild(glyphs);
+
+    const main = document.createElement("div");
+    main.className = "lifecycle-main";
+    const fn = document.createElement("span");
+    fn.className = "lifecycle-fn";
+    const info = lifecycleFnInfo(entry.fn, nodes);
+    fn.textContent = info.name;
+    main.appendChild(fn);
+
+    const loc = document.createElement("span");
+    loc.className = "lifecycle-loc";
+    loc.textContent = `${info.file || "?"}:${entry.line || "?"}`;
+    main.appendChild(loc);
+
+    if (entry.mask & 8 && entry.otherFn !== null) {
+        const pass = document.createElement("span");
+        pass.className = "lifecycle-pass";
+        const toInfo = lifecycleFnInfo(entry.otherFn, nodes);
+        pass.textContent = `${shortEntityName(entry.entity)} -> ${shortEntityName(entry.otherEntity)} @ ${toInfo.name}`;
+        main.appendChild(pass);
+    } else if (entry.entity) {
+        const ent = document.createElement("span");
+        ent.className = "lifecycle-entity";
+        ent.textContent = shortEntityName(entry.entity);
+        main.appendChild(ent);
+    }
+
+    const via = document.createElement("span");
+    via.className = "lifecycle-via";
+    via.textContent = entry.via;
+    main.appendChild(via);
+    row.appendChild(main);
+    return row;
+}
+
+function renderLifecycleTimeline(host, trace, nodes) {
+    const entries = lifecycleEntries(trace);
+    if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "lifecycle-empty";
+        empty.textContent = "This data group has no read/write/pass events.";
+        host.appendChild(empty);
+        return;
+    }
+
+    const heading = document.createElement("div");
+    heading.className = "lifecycle-heading";
+    heading.textContent = `Timeline · ${entries.length} events (approx. program order)`;
+    host.appendChild(heading);
+
+    if (entries.length <= 200) {
+        // Collapsible role groups for readable short traces.
+        for (const role of LIFECYCLE_ROLES) {
+            const matching = entries.filter(e => e.mask & role.bit);
+            if (!matching.length) continue;
+            const details = document.createElement("details");
+            details.className = "lifecycle-group";
+            details.open = true;
+            const summary = document.createElement("summary");
+            summary.innerHTML = `<span class="lifecycle-glyph ${role.cls}">${role.glyph}</span>
+                <span>${role.label}</span><span class="lifecycle-count">${matching.length}</span>`;
+            details.appendChild(summary);
+            const body = document.createElement("div");
+            body.className = "lifecycle-group-body";
+            matching.forEach(entry => body.appendChild(lifecycleRow(entry, nodes, trace)));
+            details.appendChild(body);
+            host.appendChild(details);
+        }
+        return;
+    }
+
+    // Larger traces: windowed list (only the visible ~60 rows exist in the DOM).
+    const viewport = document.createElement("div");
+    viewport.className = "lifecycle-virtual";
+    const sizer = document.createElement("div");
+    sizer.className = "lifecycle-virtual-sizer";
+    const inner = document.createElement("div");
+    inner.className = "lifecycle-virtual-inner";
+    const ROW_HEIGHT = 38;
+    sizer.style.height = `${entries.length * ROW_HEIGHT}px`;
+    sizer.appendChild(inner);
+    viewport.appendChild(sizer);
+    host.appendChild(viewport);
+
+    let start = -1;
+    const draw = () => {
+        const height = viewport.clientHeight || 480;
+        const visible = Math.ceil(height / ROW_HEIGHT) + 12;
+        const nextStart = Math.max(0, Math.floor(viewport.scrollTop / ROW_HEIGHT) - 4);
+        if (nextStart === start) return;
+        start = nextStart;
+        inner.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
+        inner.innerHTML = "";
+        entries.slice(start, start + visible).forEach(entry => {
+            inner.appendChild(lifecycleRow(entry, nodes, trace));
+        });
+    };
+    viewport.addEventListener("scroll", draw);
+    requestAnimationFrame(draw);
+    setTimeout(draw, 40);
+}
+
+function renderLifecycleInContainer(trace, view, paramEntity, container, nodes) {
+    container.innerHTML = "";
+
+    const start = document.createElement("div");
+    start.className = "lifecycle-start";
+    let origin = trace.origin || {};
+    if (view && view.mode === "backward" && view.originFn !== undefined) {
+        const info = lifecycleFnInfo(view.originFn, nodes);
+        origin = {
+            node: view.originFn,
+            name: info.name,
+            file: view.originFile || origin.file,
+            line: view.originLine || origin.line
+        };
+    }
+    const here = document.createElement("div");
+    here.className = "lifecycle-start-title";
+    here.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+        + `<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.4l6.1-.9L12 3Z"></path></svg>`
+        + `<span>Start here</span>`;
+    start.appendChild(here);
+
+    const fnLine = document.createElement("div");
+    fnLine.className = "lifecycle-start-fn";
+    fnLine.textContent = origin.name || "unknown origin";
+    start.appendChild(fnLine);
+
+    const fileLine = document.createElement("div");
+    fileLine.className = "lifecycle-start-file";
+    const fileText = origin.file ? `${origin.file}:${origin.line || "?"}` : "(no file)";
+    fileLine.textContent = fileText;
+    fileLine.title = fileText;
+    start.appendChild(fileLine);
+
+    const actions = document.createElement("div");
+    actions.className = "lifecycle-start-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "lifecycle-copy";
+    copy.textContent = "Copy path";
+    copy.addEventListener("click", () => {
+        const text = origin.file ? `${origin.file}:${origin.line || ""}` : "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                copy.textContent = "Copied";
+                setTimeout(() => { copy.textContent = "Copy path"; }, 1200);
+            }).catch(() => {});
+        }
+    });
+    actions.appendChild(copy);
+
+    const jump = document.createElement("button");
+    jump.type = "button";
+    jump.className = "lifecycle-copy";
+    jump.textContent = "Jump to origin";
+    jump.addEventListener("click", () => {
+        if (origin.node !== undefined) centerNodeOnGraph(origin.node);
+    });
+    actions.appendChild(jump);
+    start.appendChild(actions);
+
+    if (paramEntity) {
+        const paramLine = document.createElement("div");
+        paramLine.className = "lifecycle-param";
+        paramLine.textContent = `parameter ${shortEntityName(paramEntity)} · ${view.mode} mode`;
+        start.appendChild(paramLine);
+    }
+    container.appendChild(start);
+
+    const body = document.createElement("div");
+    body.className = "lifecycle-body";
+    container.appendChild(body);
+    renderLifecycleTimeline(body, trace, nodes);
+}
+
 window.DetailPanelManager = DetailPanelManager;
 window.renderSubGraphInContainer = renderSubGraphInContainer;
+window.renderLifecycleInContainer = renderLifecycleInContainer;

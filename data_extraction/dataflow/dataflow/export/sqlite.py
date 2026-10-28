@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 
@@ -23,6 +24,9 @@ def build(path: str, sym, linker, interproc, exec_info, residency) -> dict:
             optional INTEGER, value INTEGER, line INTEGER
         );
         CREATE TABLE entities (id TEXT PRIMARY KEY, kind TEXT, type TEXT);
+        CREATE TABLE types (
+            name TEXT, module TEXT, extends TEXT, fields TEXT
+        );
         CREATE TABLE accesses (
             function_id TEXT, entity TEXT, mode TEXT, line INTEGER, via TEXT,
             exec_space TEXT, propagated INTEGER
@@ -78,6 +82,13 @@ def build(path: str, sym, linker, interproc, exec_info, residency) -> dict:
     for entity, a in entity_rows.items():
         cur.execute("INSERT OR REPLACE INTO entities VALUES (?,?,?)", (
             entity, entity.split(":", 1)[0], a.get("type")))
+    # Derived-type table. The static viewer exporter uses it to merge equivalent
+    # field paths (t_nh_state%prog%rho == t_nh_prog%rho).
+    for name, entries in sym.types.items():
+        for t in entries:
+            cur.execute("INSERT INTO types VALUES (?,?,?,?)", (
+                t.get("name") or name, t.get("module"), t.get("extends"),
+                json.dumps(t.get("fields") or [], separators=(",", ":"))))
     for pid, accs in interproc.accesses.items():
         for a in accs:
             cur.execute("INSERT INTO accesses VALUES (?,?,?,?,?,?,?)", (

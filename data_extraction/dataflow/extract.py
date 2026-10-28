@@ -20,7 +20,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 
 from dataflow import execspace, interproc, intraproc, linker as linker_mod, residency
-from dataflow.export import coverage, dot, entities, index, shards, sqlite
+from dataflow.export import coverage, dot, entities, index, shards, sqlite, vis
 from dataflow.manifest import build_manifest, manifest_summary
 from dataflow.profile import available_profiles, load_profile
 from dataflow.symtab import SymbolTable, merge_profile_facts
@@ -55,6 +55,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--limit", type=int, default=None, help="limit number of files")
     ap.add_argument("--no-dot", action="store_true", help="skip GraphViz export")
     ap.add_argument("--no-sqlite", action="store_true")
+    ap.add_argument("--vis", action="store_true",
+                    help="export the static call-graph viewer data (vis/)")
+    ap.add_argument("--vis-dir", default=None,
+                    help="viewer output directory (default: <repo>/vis)")
+    ap.add_argument("--no-vis-layout", action="store_true",
+                    help="skip the Node layout.json step")
+    ap.add_argument("--vis-layout-script", default=None)
     ap.add_argument("--quiet", action="store_true")
     return ap.parse_args(argv)
 
@@ -272,6 +279,28 @@ def main(argv: list[str]) -> int:
         sqlite.build(os.path.join(out_dir, "dataflow.sqlite"), sym, link, inter,
                      exec_info, residency_info)
         log("wrote dataflow.sqlite")
+
+    if args.vis:
+        repo_root = os.path.dirname(os.path.dirname(HERE))
+        vis_dir = os.path.abspath(args.vis_dir or os.path.join(repo_root, "vis"))
+        t_vis = time.time()
+        source = vis.source_from_pipeline(sym, link, inter, exec_info,
+                                          file_meta, model_root)
+        source["profiles"] = [p.name for p in profiles]
+        vres = vis.build(source, vis_dir)
+        log(f"wrote viewer data -> {vis_dir}: {vres['graph']}, "
+            f"{vres['traces']['groups']} trace groups, "
+            f"{vres['search']['entries']} search entries "
+            f"({time.time() - t_vis:.1f}s)")
+        if not args.no_vis_layout:
+            graph_path = os.path.join(vis_dir, "graph.json")
+            layout_path = os.path.join(vis_dir, "layout.json")
+            if vis.run_layout(graph_path, layout_path,
+                              args.vis_layout_script or
+                              os.path.join(repo_root, "build_layout.js")):
+                log("wrote vis/layout.json")
+            else:
+                log("warning: layout.json skipped (node or build_layout.js unavailable)")
 
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({

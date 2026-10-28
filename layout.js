@@ -744,3 +744,26 @@ function buildCombinedGraph(nodeId, nodes, edges) {
         focusDepth: callerOffset
     };
 }
+
+// UMD-style export so the layout can be computed headlessly in Node during the
+// offline viewer build (see build_layout.js) without duplicating any code.
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        parseNodeLabel,
+        makeFileKey,
+        makeDAG,
+        buildLevels,
+        buildFolderFileIndex,
+        buildInitialLayout,
+        flattenFileOrder,
+        optimizeLayout,
+        getNodeFolder,
+        getNodeFile,
+        getNodeFileKey,
+        buildReverseEdgeMap,
+        flipGraph,
+        buildCombinedGraph,
+        cloneNodes,
+        cloneEdges
+    };
+}

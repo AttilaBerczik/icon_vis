@@ -51,8 +51,12 @@ window.getFileColor = getFileColor;
 function setContextMenuItem(id, visible, label) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.style.display = visible ? "block" : "none";
-    if (label !== undefined) el.textContent = label;
+    const labelEl = el.querySelector(".ctx-label");
+    el.style.display = visible ? "flex" : "none";
+    if (label !== undefined) {
+        if (labelEl) labelEl.textContent = label;
+        else el.textContent = label;
+    }
 }
 
 function isContextTargetFolderHidden(target) {
@@ -73,7 +77,7 @@ function showGraphContextMenu(event, target) {
     const fileProtected = !!(rootInfo && target.fileKey && rootInfo.fileKey === target.fileKey);
 
     if (target.kind === "node") {
-        setContextMenuItem("ctx-open-tab", true, `🔍 Open "${target.functionName}" in Side Tab`);
+        setContextMenuItem("ctx-open-tab", true, `Open "${target.functionName}" in Side Tab`);
     } else {
         setContextMenuItem("ctx-open-tab", false);
     }
@@ -81,14 +85,14 @@ function showGraphContextMenu(event, target) {
     if (target.fileKey && !fileProtected) {
         const hidden = isContextTargetFileHidden(target);
         const name = target.fileName || target.fileKey;
-        setContextMenuItem("ctx-hide-file", true, hidden ? `👁 Unhide file "${name}"` : `🚫 Hide file "${name}"`);
+        setContextMenuItem("ctx-hide-file", true, hidden ? `Unhide file "${name}"` : `Hide file "${name}"`);
     } else {
         setContextMenuItem("ctx-hide-file", false);
     }
 
     if (target.folder && !folderProtected) {
         const hidden = isContextTargetFolderHidden(target);
-        setContextMenuItem("ctx-hide-folder", true, hidden ? `👁 Unhide folder "${target.folder}"` : `🚫 Hide folder "${target.folder}"`);
+        setContextMenuItem("ctx-hide-folder", true, hidden ? `Unhide folder "${target.folder}"` : `Hide folder "${target.folder}"`);
     } else {
         setContextMenuItem("ctx-hide-folder", false);
     }
@@ -214,6 +218,14 @@ function createGraphState() {
         // Main-view caller/callee roles anchored to the active side-panel tab.
         roleAnchorId: null,
         roleMap: null,
+        // Data-flow trace layer (see setDataTrace below).
+        dataTrace: null,
+        traceBadgeGroup: null,
+        // Optional precomputed layout from vis/layout.json.
+        precomputedLayout: null,
+        // Called on every pan/zoom so HTML overlays (parameter card/pill) can
+        // follow the graph transform.
+        onTransform: null,
     };
 }
 
@@ -409,7 +421,31 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // Only run the randomized optimization on the very first render.
     let orderedFolders, orderedFilesByFolder, nodeOrderByFileDepth, fileMetaByKey;
 
-    if (!state.cachedLayout || state.isInitialRender) {
+    // The offline build stores the ordering computed by this very file in
+    // vis/layout.json. Reuse it on first paint unless the graph changed (hide/
+    // unhide or external-library folding), in which case a fresh optimization
+    // runs exactly as before.
+    function precomputedIsCompatible(cache, levelList) {
+        if (!cache || !cache.nodeOrderByFileDepth) return false;
+        let cachedCount = 0;
+        for (const depthMap of cache.nodeOrderByFileDepth.values()) {
+            for (const ids of depthMap.values()) cachedCount += ids.length;
+        }
+        const currentCount = levelList.reduce((sum, level) => sum + level.length, 0);
+        return cachedCount === currentCount;
+    }
+
+    const precomputed = options && options.precomputedLayout;
+    if (!state.cachedLayout && precomputed && precomputedIsCompatible(precomputed, levels)) {
+        state.cachedLayout = {
+            folderOrder: Array.from(precomputed.folderOrder),
+            fileOrderByFolder: new Map(precomputed.fileOrderByFolder),
+            nodeOrderByFileDepth: new Map(precomputed.nodeOrderByFileDepth),
+            fileMetaByKey: new Map(precomputed.fileMetaByKey)
+        };
+    }
+
+    if (!state.cachedLayout) {
         const { folderOrder: fo, fileOrderByFolder: fof, fileMetaByKey: fmbk } = buildFolderFileIndex(levels, nodes);
         const optimized = optimizeLayout(levels, depthById, nodes, edges, fo, fof);
         state.cachedLayout = {
@@ -1454,9 +1490,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "file") return "#8b5cf6"; // File match: vivid violet
             if (mt === "folder") return "#06b6d4"; // Folder match: electric cyan
         }
-        if (isTabNode(d)) return "#059669"; // Active tab's selected node: unique emerald green
-        if (isRootNode(d)) return "#2563eb";
-        return "#e2e8f0";
+        if (isTabNode(d)) return "#422006"; // Active tab's selected node (also styled by CSS)
+        if (isRootNode(d)) return "#1D4ED8";
+        return "#202024";
     };
 
     const getNodeRectStroke = (d) => {
@@ -1467,8 +1503,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "file") return "#5b21b6";
             if (mt === "folder") return "#0e7490";
         }
-        if (isTabNode(d)) return "#047857"; // Deep emerald green border
-        return "#94a3b8";
+        if (isTabNode(d)) return "#F59E0B"; // Active-tab border (also styled by CSS)
+        return "#3F3F46";
     };
 
     const getNodeRectStrokeWidth = (d) => {
@@ -1497,18 +1533,18 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "function") return "#0f172a"; // Deep bold black text on vivid amber gold
             if (mt === "file" || mt === "folder") return "#ffffff";
         }
-        if (isTabNode(d)) return "#ffffff";
-        if (isRootNode(d)) return "#f8fafc";
+        if (isTabNode(d)) return "#FDE68A";
+        if (isRootNode(d)) return "#F8FAFC";
         // Role text colours are inlined only for focused sub-graphs, where the
         // role can never change. The main view gets its role colours from the
         // CSS classes so closing the side panel cleanly restores neutral text.
         if (focusNodeId) {
             const role = getNodeRole(d);
-            if (role === "caller") return "#7c2d12";
-            if (role === "callee") return "#134e4a";
-            if (role === "both") return "#312e81";
+            if (role === "caller") return "#FCD34D";
+            if (role === "callee") return "#5EEAD4";
+            if (role === "both") return "#C7D2FE";
         }
-        return "#1f2937";
+        return "#E4E4E7";
     };
 
     // In a focused sub-graph (the side panel's Callees/Callers/Combined views)
@@ -1589,6 +1625,11 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     }
 
     const nodesGroup = mainGroup.append("g").attr("class", "nodes");
+
+    // Role badges for the data-flow trace. One overlay <g>, updated in the
+    // existing culling pass, so nothing is re-rendered when a trace changes.
+    const traceBadgeGroup = mainGroup.append("g").attr("class", "trace-badges");
+    state.traceBadgeGroup = traceBadgeGroup;
 
     // Phase 1: Spatial indexes for high-performance viewport culling
     const spatialNodeIndex = new SpatialIndex(600);
@@ -1711,7 +1752,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     backBtn.append("span")
         .attr("class", "back-graph-arrow")
-        .text("⌖");
+        .html('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" '
+            + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            + '<path d="M8 3H3v5"></path><path d="M16 3h5v5"></path>'
+            + '<path d="M8 21H3v-5"></path><path d="M16 21h5v-5"></path></svg>');
 
     backBtn.append("span")
         .attr("class", "back-graph-text")
@@ -1829,6 +1873,18 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             culledEdges = collectHighlightEdges(curActiveSet, curPrimaryId);
         }
 
+        // Data-flow trace edges must be visible even while the global "Edges"
+        // toggle is off; they are the point of the trace view.
+        if (state.dataTrace && state.traceEdgeObjects && state.traceEdgeObjects.length) {
+            const seenEdges = new Set(culledEdges.map((e) => e.edgeKey));
+            for (const edgeObj of state.traceEdgeObjects) {
+                if (!seenEdges.has(edgeObj.edgeKey)) {
+                    seenEdges.add(edgeObj.edgeKey);
+                    culledEdges.push(edgeObj);
+                }
+            }
+        }
+
         // --- 1. Nodes Enter / Update / Exit ---
         const nodeSel = nodesGroup.selectAll("g.node-g")
             .data(culledNodes, d => d.id);
@@ -1927,6 +1983,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                     if (role) this.classList.add(`node-highlight-${role}`);
                 }
             }
+            applyTraceNodeClasses(this, d);
         });
 
         // LOD text reconciliation for existing nodes
@@ -1973,6 +2030,201 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
                 }
             }
         });
+
+        applyTraceEdgeClasses();
+        updateTraceBadges(culledNodes);
+    }
+
+    function traceRoleMask(id) {
+        const trace = state.dataTrace;
+        return trace && trace.roles ? (trace.roles.get(id) || 0) : 0;
+    }
+
+    function applyTraceNodeClasses(el, d) {
+        if (!el || !d) return;
+        const trace = state.dataTrace;
+        const on = !!(trace && !d.isDummy && trace.nodeIds.has(d.id));
+        el.classList.toggle("trace-node", on);
+        el.classList.toggle("trace-dim", !!(trace && !on));
+        el.classList.toggle("trace-origin", !!(on && trace.originFn === d.id));
+        const mask = on ? traceRoleMask(d.id) : 0;
+        el.classList.toggle("trace-create", !!(mask & 1));
+        el.classList.toggle("trace-write", !!(mask & 2));
+        el.classList.toggle("trace-read", !!(mask & 4));
+        el.classList.toggle("trace-pass", !!(mask & 8));
+        if (on && trace.steps && trace.steps.has(d.id)) {
+            el.dataset.traceStep = String(trace.steps.get(d.id));
+        } else if (el.dataset && el.dataset.traceStep) {
+            delete el.dataset.traceStep;
+        }
+    }
+
+    function applyTraceEdgeClasses() {
+        const trace = state.dataTrace;
+        const animate = !!(trace && trace.edges && trace.edges.size > 0 &&
+            trace.edges.size < 300 &&
+            !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches));
+        edgesGroup.selectAll("path.graph-edge").each(function(d) {
+            if (!d) return;
+            const from = d.realFromId !== undefined ? d.realFromId : d.fromId;
+            const to = d.realToId !== undefined ? d.realToId : d.toId;
+            const on = !!(trace && trace.edges && trace.edges.has(`${from}|${to}`));
+            this.classList.toggle("trace-edge", on);
+            this.classList.toggle("trace-edge-animate", !!(on && animate));
+        });
+    }
+
+    function updateTraceBadges(culledNodes) {
+        const trace = state.dataTrace;
+        const group = state.traceBadgeGroup;
+        if (!group) return;
+        const items = (trace && !trace.large)
+            ? culledNodes.filter((d) => !d.isDummy && trace.nodeIds.has(d.id))
+            : [];
+        const sel = group.selectAll("g.trace-badge").data(items, (d) => d.id);
+        sel.exit().remove();
+        const enter = sel.enter().append("g").attr("class", "trace-badge");
+        enter.append("circle").attr("r", 8);
+        enter.append("text")
+            .attr("text-anchor", "middle").attr("dy", "0.35em");
+        const merged = enter.merge(sel);
+        merged.attr("transform", (d) => {
+            const pos = positions.get(d.id);
+            if (!pos) return "translate(-9999,-9999)";
+            return `translate(${pos.x - d.width / 2 - 9}, ${pos.y - d.height / 2 - 9})`;
+        });
+        merged.each(function(d) {
+            const mask = traceRoleMask(d.id);
+            const isOrigin = trace.originFn === d.id;
+            const step = trace.steps && trace.steps.get(d.id);
+            const el = d3.select(this);
+            let glyph = "";
+            if (step !== undefined && trace.mode === "backward") glyph = String(step);
+            else if (mask & 1) glyph = "C";
+            else if ((mask & 2) && (mask & 4)) glyph = "B";
+            else if (mask & 2) glyph = "W";
+            else if (mask & 4) glyph = "R";
+            else if (mask & 8) glyph = "P";
+            el.classed("trace-badge-origin", isOrigin);
+            el.classed("trace-badge-create", !!(mask & 1));
+            el.classed("trace-badge-write", !!(mask & 2));
+            el.classed("trace-badge-read", !!(mask & 4));
+            el.classed("trace-badge-pass", !!(mask & 8));
+            el.select("text").text(glyph);
+        });
+    }
+
+    function updateTraceBoxBadges() {
+        const trace = state.dataTrace;
+        if (!trace) return;
+        const addBadges = (group, selector, counts, keyFn) => {
+            group.selectAll(selector).each(function(d) {
+                const count = counts && counts.get(keyFn(d));
+                const el = d3.select(this);
+                el.classed("trace-box", count !== undefined && count > 0);
+                let label = el.select("text.trace-box-count");
+                if (count) {
+                    if (label.empty()) {
+                        label = el.append("text")
+                            .attr("class", "trace-box-count")
+                            .attr("text-anchor", "end");
+                    }
+                    label.attr("x", d.x + d.width - 8)
+                        .attr("y", d.y + 16)
+                        .text(`${count} fn`);
+                } else if (!label.empty()) {
+                    label.remove();
+                }
+            });
+        };
+        addBadges(folderBoxesGroup, "g.folder-box", trace.folderCounts, (d) => d.folder);
+        addBadges(fileBoxesGroup, "g.file-box", trace.fileCounts, (d) => d.label || d.file);
+    }
+
+    function applyTraceToDom() {
+        const trace = state.dataTrace;
+        svg.classed("has-data-trace", !!trace);
+        if (!trace) {
+            nodesGroup.selectAll("g.node-g").each(function(d) {
+                applyTraceNodeClasses(this, d);
+            });
+            edgesGroup.selectAll("path.graph-edge").each(function() {
+                this.classList.remove("trace-edge", "trace-edge-animate");
+            });
+            folderBoxesGroup.selectAll("g.folder-box").classed("trace-box", false);
+            fileBoxesGroup.selectAll("g.file-box").classed("trace-box", false);
+            folderBoxesGroup.selectAll("text.trace-box-count").remove();
+            fileBoxesGroup.selectAll("text.trace-box-count").remove();
+            if (state.traceBadgeGroup) state.traceBadgeGroup.selectAll("*").remove();
+            return;
+        }
+        nodesGroup.selectAll("g.node-g").each(function(d) {
+            applyTraceNodeClasses(this, d);
+        });
+        applyTraceEdgeClasses();
+        updateTraceBoxBadges();
+    }
+
+    function expandBoxesForTrace(trace) {
+        if (!trace || trace.large || !state.currentGraphData) return false;
+        const nodes = state.currentGraphData.nodes;
+        let changed = false;
+        for (const id of trace.nodeIds) {
+            const rawLabel = nodes.get(id);
+            if (!rawLabel) continue;
+            const info = parseNodeLabel(rawLabel);
+            if (info.folder && state.collapsedFolders.has(info.folder)) {
+                state.collapsedFolders.delete(info.folder);
+                changed = true;
+            }
+            const fileKey = makeFileKey(info.folder, info.file);
+            if (fileKey && state.collapsedFiles.has(fileKey)) {
+                state.collapsedFiles.delete(fileKey);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    function setDataTrace(trace, mode) {
+        state.dataTrace = trace || null;
+        state.traceEdgeObjects = null;
+        if (trace) {
+            const edgeObjects = [];
+            for (const edgeObj of linkData) {
+                const from = edgeObj.realFromId !== undefined ? edgeObj.realFromId : edgeObj.fromId;
+                const to = edgeObj.realToId !== undefined ? edgeObj.realToId : edgeObj.toId;
+                if (trace.edges && trace.edges.has(`${from}|${to}`)) edgeObjects.push(edgeObj);
+            }
+            state.traceEdgeObjects = edgeObjects;
+            if (expandBoxesForTrace(trace)) {
+                renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById,
+                    state.currentGraphData.nodes, state.currentGraphData.edges,
+                    container, state, { ...options, collapseAllOnInit: false });
+                return;
+            }
+        }
+        applyTraceToDom();
+        updateViewportCulling(true);
+        if (state.onTransform) state.onTransform(state.currentZoomTransform);
+    }
+
+    function clearDataTrace() {
+        setDataTrace(null, null);
+    }
+
+    function centerNode(nodeId, targetScale) {
+        const pos = positions.get(nodeId);
+        if (!pos || !state.currentZoomBehavior) return;
+        const scale = targetScale || Math.max((state.currentZoomTransform || d3.zoomIdentity).k, 0.75);
+        const vp = state.viewportDims || { width: viewportWidth, height: viewportHeight };
+        const transform = d3.zoomIdentity
+            .translate(vp.width / 2 - pos.x * scale, vp.height / 2 - pos.y * scale)
+            .scale(scale);
+        state.currentZoomTransform = transform;
+        svg.transition().duration(450).ease(d3.easeCubicOut)
+            .call(zoom.transform, transform)
+            .on("end", () => updateViewportCulling(true));
     }
 
     let cullingRafId = null;
@@ -1987,6 +2239,13 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     container.node().updateViewportCulling = updateViewportCulling;
     state.updateViewportCulling = updateViewportCulling;
     state.requestCulling = scheduleCulling;
+
+    // Data-flow trace API: lives in renderGraph's scope because it needs the
+    // node positions, the badge overlay and the culling pass.
+    container.node().setDataTrace = (trace, mode) => setDataTrace(trace, mode);
+    container.node().clearDataTrace = () => clearDataTrace();
+    container.node().getDataTrace = () => state.dataTrace;
+    container.node().centerNode = (nodeId, scale) => centerNode(nodeId, scale);
 
     if (window.ResizeObserver && containerNode) {
         if (containerNode._navResizeObserver) {
@@ -2029,6 +2288,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             mainGroup.attr("transform", event.transform);
             updateNavButton();
             scheduleCulling();
+            if (state.onTransform) state.onTransform(event.transform);
         })
         .on("end", () => {
             if (cullingRafId) {
@@ -2058,6 +2318,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     // Initial render of culled viewport elements
     updateViewportCulling(true);
+    if (state.dataTrace) applyTraceToDom();
 
     // If focusing on a search node, smoothly pan to it
     if (options && options.focusSearchNodeId && positions.has(options.focusSearchNodeId)) {
@@ -2853,6 +3114,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         cNode.refreshHighlight = function() {
             updateHighlightState(currentActiveSet, currentPrimaryId);
         };
+
     }
 }
 

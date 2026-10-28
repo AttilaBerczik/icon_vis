@@ -35,6 +35,11 @@ Useful flags:
 * `--no-cache` – ignore the content-addressed fact cache.
 * `--include DIR` – extra preprocessor include directory.
 * `--no-dot`, `--no-sqlite` – skip optional exports.
+* `--vis` – export the static call-graph viewer data (`vis/`): graph, cached
+  layout, per-component parameter shards, sorted data search index and 256
+  precomputed lifecycle shards. Add `--no-vis-layout` to skip the Node layout
+  step, or `--vis-dir DIR` to write somewhere else. All JSON files also get
+  `.br`/`.gz` copies for a precompressed static server.
 
 The cache lives in `<out>/.cache`. After a tool-version bump it is
 automatically invalidated. Re-runs with warm cache only re-parse changed files:
@@ -54,6 +59,17 @@ warm, plus global analysis.
 | `out/dataflow.dot` | bipartite function ↔ data-entity graph for source-level direct accesses (`read`/`write`/`readwrite`); inter-procedural effects are in `passes.json`/`index.json` |
 | `out/dataflow.sqlite` | indexed tables: `functions`, `params`, `entities`, `accesses`, `calls`, `passes`, `links`, `residency_events`, `findings` |
 | `out/manifest.json` | exact file list, profiles, include roots, timings |
+| `vis/graph.json` + `vis/layout.json` | static viewer graph and its cached ordering (`--vis`) |
+| `vis/fn/<component>.json` | per-function parameters, intents, ranks and lifecycle group ids |
+| `vis/search.json` | sorted field/parameter/module-variable search index |
+| `vis/trace/<xx>.json` | 256 precomputed lifecycle shards (create/write/read/pass) |
+
+Lifecycle groups merge equivalent field paths onto the type that owns the leaf
+(`t_nh_state%prog%rho` ≡ `t_nh_prog%rho`). Call-site passes are treated as
+**unambiguous**: a callee formal joins its actuals only when all of them resolve
+to the same data entity. This keeps `hydro_adjust::rho` attached to
+`t_nh_prog%rho` without merging the thousands of unrelated error-message locals
+that flow through utility routines such as `mpi::finish`.
 
 ### Entity IDs
 
