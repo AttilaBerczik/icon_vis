@@ -436,6 +436,18 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     const nodeDims = new Map(nodeData.map(d => [d.id, { w: d.width, h: d.height }]));
 
+    // Every folder/file that actually owns a node in the graph being rendered.
+    // These are the authoritative sets for "close everything": using the cached
+    // layout's folder/file lists here leaves nodes visible when the cache is
+    // stale and describes a different set of folders (e.g. after regeneration).
+    const currentFolders = new Set();
+    const currentFiles = new Set();
+    nodeData.forEach(d => {
+        if (d.isDummy) return;
+        if (d.folder !== null && d.folder !== undefined) currentFolders.add(d.folder);
+        if (d.fileKey !== null && d.fileKey !== undefined) currentFiles.add(d.fileKey);
+    });
+
     // --- Layout Caching ---
     // Only run the randomized optimization on the very first render.
     let orderedFolders, orderedFilesByFolder, nodeOrderByFileDepth, fileMetaByKey;
@@ -444,6 +456,12 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     // vis/layout.json. Reuse it on first paint unless the graph changed (hide/
     // unhide or external-library folding), in which case a fresh optimization
     // runs exactly as before.
+    //
+    // Checking the node count alone is not enough: a regenerated graph can keep
+    // the same number of nodes while moving them into different folders/files
+    // (e.g. ".." → "horizontal"/"interpolation"). Such a cache must be rejected,
+    // otherwise the new folders are absent from folderOrder/fileOrder, are never
+    // collapsed on init, and their nodes stay visible in the "all closed" view.
     function precomputedIsCompatible(cache, levelList) {
         if (!cache || !cache.nodeOrderByFileDepth) return false;
         let cachedCount = 0;
@@ -451,7 +469,21 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             for (const ids of depthMap.values()) cachedCount += ids.length;
         }
         const currentCount = levelList.reduce((sum, level) => sum + level.length, 0);
-        return cachedCount === currentCount;
+        if (cachedCount !== currentCount) return false;
+
+        const cachedFolders = new Set(cache.folderOrder || []);
+        const cachedFiles = new Set();
+        for (const files of (cache.fileOrderByFolder || new Map()).values()) {
+            for (const file of files) cachedFiles.add(file);
+        }
+        if (cachedFolders.size !== currentFolders.size || cachedFiles.size !== currentFiles.size) return false;
+        for (const folder of currentFolders) {
+            if (!cachedFolders.has(folder)) return false;
+        }
+        for (const file of currentFiles) {
+            if (!cachedFiles.has(file)) return false;
+        }
+        return true;
     }
 
     const precomputed = options && options.precomputedLayout;
@@ -494,8 +526,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             ? options.collapseAllOnInit
             : !focusNodeId;
         if (shouldCollapseAll) {
-            orderedFolders.forEach(folder => collapsedFolders.add(folder));
-            fileOrder.forEach(file => collapsedFiles.add(file));
+            currentFolders.forEach(folder => collapsedFolders.add(folder));
+            currentFiles.forEach(file => collapsedFiles.add(file));
         }
     }
 
@@ -1359,8 +1391,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     container.node().collapseAll = function() {
         state.collapsedFolders.clear();
         state.collapsedFiles.clear();
-        orderedFolders.forEach(folder => state.collapsedFolders.add(folder));
-        fileOrder.forEach(file => state.collapsedFiles.add(file));
+        currentFolders.forEach(folder => state.collapsedFolders.add(folder));
+        currentFiles.forEach(file => state.collapsedFiles.add(file));
         state.needsFitToScreen = true;
         renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
     };
@@ -1368,7 +1400,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     container.node().expandFoldersOnly = function() {
         state.collapsedFolders.clear();
         state.collapsedFiles.clear();
-        fileOrder.forEach(file => state.collapsedFiles.add(file));
+        currentFiles.forEach(file => state.collapsedFiles.add(file));
         state.needsFitToScreen = true;
         renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById, state.currentGraphData.nodes, state.currentGraphData.edges, container, state, options);
     };

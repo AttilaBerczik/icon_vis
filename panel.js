@@ -892,23 +892,13 @@ function renderLifecycleTimeline(host, trace, nodes) {
     host.appendChild(heading);
 
     if (entries.length <= 200) {
-        // Collapsible role groups for readable short traces.
-        for (const role of LIFECYCLE_ROLES) {
-            const matching = entries.filter(e => e.mask & role.bit);
-            if (!matching.length) continue;
-            const details = document.createElement("details");
-            details.className = "lifecycle-group";
-            details.open = true;
-            const summary = document.createElement("summary");
-            summary.innerHTML = `<span class="lifecycle-glyph ${role.cls}">${role.glyph}</span>
-                <span>${role.label}</span><span class="lifecycle-count">${matching.length}</span>`;
-            details.appendChild(summary);
-            const body = document.createElement("div");
-            body.className = "lifecycle-group-body";
-            matching.forEach(entry => body.appendChild(lifecycleRow(entry, nodes, trace)));
-            details.appendChild(body);
-            host.appendChild(details);
-        }
+        // Keep the events in their recorded order. Grouping by role turned
+        // "create, pass, read, pass, read…" into separate create/pass/read
+        // sections and hid the actual sequence of uses.
+        const list = document.createElement("div");
+        list.className = "lifecycle-list";
+        entries.forEach(entry => list.appendChild(lifecycleRow(entry, nodes, trace)));
+        host.appendChild(list);
         return;
     }
 
