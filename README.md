@@ -8,7 +8,7 @@ This project visualizes the reachable call graph of the `icon.f90` codebase usin
 
 1. **Call graph** — the full reachable graph, with folder/file boxes, hidden-item filters and a cached offline layout.
 2. **Parameter card** — click a function's `⟨N⟩ params` pill (or press `P`) to see its parameters, intents and inferred-intent warnings.
-3. **Data lifecycle** — click a parameter to see its backward path to the origin, or search a field/parameter in **◆ Data** mode (`@rho`, `@t_nh_prog%vn`) to see every create, pass, write and read in approximate program order. The origin is marked **Start here** with its file and line.
+3. **Data lifecycle** — click a parameter to see its backward path to the origin, or search a field/parameter in **◆ Data** mode (`@rho`, `@t_nh_prog%vn`) to see every create, pass, write and read in approximate program order. The earliest recorded event is marked **Created here** when the trace contains a create event; otherwise it is marked **First known use** (usually a dummy argument or a value passed in from the caller). Parameters with no recorded events are marked **no path** in the parameter card; clicking one (or its ▼ button) expands its declaration site, any recorded pass-in callers, and the routine's call-graph callers instead of opening an empty lifecycle tab.
 
 The visualization uses a true Sugiyama-style layer assignment (Longest-Path) with a Node Promotion Heuristic and simulated-annealing ordering, grouping nodes by file and folder into bounding boxes.
 
@@ -121,3 +121,7 @@ gzip/brotli the JSON, so first paint is slower. The legacy DOT view remains at
 
 Keyboard: `Ctrl/⌘+F` focuses search, `@` switches to data search, `P` toggles the
 parameter card, `Esc` closes the card, then the trace, then the side tab.
+
+Mouse: scroll (or drag the background) to pan the graph, so every part of it —
+including the bottom — is reachable. Hold `Ctrl`/`⌘` while scrolling, or pinch on
+a trackpad, to zoom around the pointer.

@@ -160,6 +160,25 @@ function getReadableTextColor(color) {
     return readable;
 }
 
+// Folder/file box outlines use the same pastel palette. A pastel line on the
+// light canvas all but disappears, so darken it while keeping the hue: the
+// grouping stays visible without competing with the nodes themselves.
+const boxStrokeColorCache = new Map();
+
+function getBoxStrokeColor(color) {
+    const cacheKey = String(color);
+    if (boxStrokeColorCache.has(cacheKey)) return boxStrokeColorCache.get(cacheKey);
+
+    const hsl = d3.hsl(color);
+    if (!hsl) return "#64748B";
+
+    hsl.l = Math.min(hsl.l, 0.45);
+    hsl.s = Math.max(hsl.s, 0.35);
+    const stroke = hsl.formatHex();
+    boxStrokeColorCache.set(cacheKey, stroke);
+    return stroke;
+}
+
 // --- Edge thickness (call frequency) --------------------------------------
 // Edges carry `weight=<number of call sites>` (parsed in parser.js). The base
 // stroke width is always scaled logarithmically with the weight so that
@@ -1159,7 +1178,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("x", d => d.x).attr("y", d => d.y)
         .attr("width", d => d.width).attr("height", d => d.height)
         .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.05)
-        .attr("stroke", d => d.color).attr("stroke-width", 2)
+        .attr("stroke", d => getBoxStrokeColor(d.color)).attr("stroke-width", 2)
         .attr("stroke-dasharray", "8,4").attr("rx", FOLDER_BOX_CORNER_RADIUS);
 
     folderRects.on("contextmenu", (event, d) => {
@@ -1201,7 +1220,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         .attr("x", d => d.x).attr("y", d => d.y)
         .attr("width", d => d.width).attr("height", d => d.height)
         .attr("fill", d => d.color).attr("fill-opacity", d => d.collapsed ? 0.3 : 0.08)
-        .attr("stroke", d => d.color).attr("stroke-width", 2)
+        .attr("stroke", d => getBoxStrokeColor(d.color)).attr("stroke-width", 2)
         .attr("stroke-dasharray", "5,5").attr("rx", FILE_BOX_CORNER_RADIUS);
 
     fileRects.on("contextmenu", (event, d) => {
@@ -1490,9 +1509,9 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "file") return "#8b5cf6"; // File match: vivid violet
             if (mt === "folder") return "#06b6d4"; // Folder match: electric cyan
         }
-        if (isTabNode(d)) return "#422006"; // Active tab's selected node (also styled by CSS)
+        if (isTabNode(d)) return "#FEF3C7"; // Active tab's selected node (also styled by CSS)
         if (isRootNode(d)) return "#1D4ED8";
-        return "#202024";
+        return "#FFFFFF";
     };
 
     const getNodeRectStroke = (d) => {
@@ -1504,7 +1523,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "folder") return "#0e7490";
         }
         if (isTabNode(d)) return "#F59E0B"; // Active-tab border (also styled by CSS)
-        return "#3F3F46";
+        return "#C3CBD5";
     };
 
     const getNodeRectStrokeWidth = (d) => {
@@ -1533,18 +1552,18 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
             if (mt === "function") return "#0f172a"; // Deep bold black text on vivid amber gold
             if (mt === "file" || mt === "folder") return "#ffffff";
         }
-        if (isTabNode(d)) return "#FDE68A";
+        if (isTabNode(d)) return "#92400E";
         if (isRootNode(d)) return "#F8FAFC";
         // Role text colours are inlined only for focused sub-graphs, where the
         // role can never change. The main view gets its role colours from the
         // CSS classes so closing the side panel cleanly restores neutral text.
         if (focusNodeId) {
             const role = getNodeRole(d);
-            if (role === "caller") return "#FCD34D";
-            if (role === "callee") return "#5EEAD4";
-            if (role === "both") return "#C7D2FE";
+            if (role === "caller") return "#92400E";
+            if (role === "callee") return "#115E59";
+            if (role === "both") return "#3730A3";
         }
-        return "#E4E4E7";
+        return "#1F2937";
     };
 
     // In a focused sub-graph (the side panel's Callees/Callers/Combined views)
@@ -2189,6 +2208,12 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     function setDataTrace(trace, mode) {
         state.dataTrace = trace || null;
         state.traceEdgeObjects = null;
+        // A trace replaces the visual selection: keeping the old call-graph
+        // closure would draw hundreds of unrelated call edges on top of the
+        // few data-flow edges.
+        if (trace && typeof container.node().clearSelection === "function") {
+            container.node().clearSelection();
+        }
         if (trace) {
             const edgeObjects = [];
             for (const edgeObj of linkData) {
@@ -2277,12 +2302,23 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     };
 
     // --- Interaction Attachments & Zoom ---
+    // A little breathing room around the graph so the bottom-most folder/file
+    // box (and its labels) can always be brought fully into view.
+    const PAN_MARGIN = 80;
     const zoom = d3.zoom()
-        .scaleExtent([0.05, 5])
+        // Extremely wide layouts (e.g. "Open All") fit at scales below 0.05;
+        // allow those so the first zoom interaction does not snap the view.
+        .scaleExtent([0.001, 5])
         // Keep the user from panning the graph completely out of view: the
         // viewport may never move past the graph's bounding box.
-        .translateExtent([[gMinX, gMinY], [gMaxX, gMaxY]])
+        .translateExtent([
+            [gMinX - PAN_MARGIN, gMinY - PAN_MARGIN],
+            [gMaxX + PAN_MARGIN, gMaxY + PAN_MARGIN]
+        ])
         .extent([[0, 0], [viewportWidth, viewportHeight]])
+        // Wheel and trackpad scrolling are handled below so a normal scroll
+        // pans instead of zooming.
+        .filter((event) => event.type !== "wheel" && !event.button)
         .on("zoom", (event) => {
             state.currentZoomTransform = event.transform;
             mainGroup.attr("transform", event.transform);
@@ -2299,6 +2335,26 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         });
 
     svg.call(zoom);
+
+    // Scroll to pan, so the whole graph (including its bottom) can be reached
+    // without dragging. Ctrl/⌘ + scroll (or a trackpad pinch) zooms around the
+    // pointer instead.
+    const wheelPan = (event) => {
+        event.preventDefault();
+        const unit = event.deltaMode === 1 ? 16 : (event.deltaMode === 2 ? viewportHeight : 1);
+        const dx = (event.deltaX || 0) * unit;
+        const dy = (event.deltaY || 0) * unit;
+        if (!dx && !dy) return;
+        if (event.ctrlKey || event.metaKey) {
+            const rect = svg.node().getBoundingClientRect();
+            const factor = Math.exp(-dy * 0.002);
+            if (factor === 1) return;
+            svg.call(zoom.scaleBy, factor, [event.clientX - rect.left, event.clientY - rect.top]);
+            return;
+        }
+        svg.call(zoom.translateBy, -dx, -dy);
+    };
+    svg.node().addEventListener("wheel", wheelPan, { passive: false });
 
     if (state.isInitialRender || state.needsFitToScreen) {
         state.currentZoomTransform = computeFitTransform(viewportWidth, viewportHeight);
@@ -2619,6 +2675,13 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
     }
 
     function updateHighlightState(activeSet, primaryId) {
+        // While a data trace is active, the trace overlay is the meaningful
+        // selection. Highlighting the transitive call closure here would bury
+        // the data path under hundreds of unrelated call edges.
+        if (state && state.dataTrace) {
+            activeSet = null;
+            primaryId = null;
+        }
         // 1. Clear the previous highlight directly in the DOM. Querying the
         //    visible selection avoids retaining references to elements that the
         //    viewport-culling engine has since removed (a detached-DOM leak), and
@@ -2786,6 +2849,13 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             const d = nodeG.__data__;
             if (!d) return;
 
+            if (state && state.dataTrace) {
+                if (options && typeof options.onNodeHover === "function") {
+                    options.onNodeHover(d.id, new Set([d.id]));
+                }
+                return;
+            }
+
             const immediateNeighbors = window.getFullImmediateNeighbors ?
                 window.getFullImmediateNeighbors(d.id) :
                 getImmediateNeighbors(d.id, edgesMap, reverseEdgesMap);
@@ -2822,6 +2892,16 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             if (!nodeG) return;
             const d = nodeG.__data__;
             if (!d) return;
+
+            if (state && state.dataTrace) {
+                // Keep the trace view intact, but still let the card/panel react
+                // to the clicked node.
+                if (options && typeof options.onNodeClick === "function") {
+                    options.onNodeClick(d.id, new Set([d.id]));
+                }
+                event.stopPropagation();
+                return;
+            }
 
             if (activeClickedNodeId === d.id) {
                 activeClickedNodeId = null;
@@ -2881,6 +2961,10 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             const d = edgePath.__data__;
             if (!d) return;
 
+            // Trace edges are inspected through the trace overlay; do not add
+            // call-graph closure highlighting on top of them.
+            if (state && state.dataTrace) return;
+
             const origin = d.realFromId || d.fromId;
             const target = d.realToId || d.toId;
             const activeSet = new Set([origin, target]);
@@ -2927,6 +3011,8 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             const d = edgePath.__data__;
             if (!d) return;
             event.stopPropagation();
+
+            if (state && state.dataTrace) return;
 
             const origin = d.realFromId || d.fromId;
             const target = d.realToId || d.toId;
@@ -2993,6 +3079,12 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
             } else {
                 updateHighlightState(null, null);
             }
+        };
+
+        cNode.clearSelection = function() {
+            activeClickedNodeId = null;
+            if (state) state.activeClickedNodeId = null;
+            updateHighlightState(null, null);
         };
 
         cNode.selectNode = function(nodeId, passedActiveSet) {

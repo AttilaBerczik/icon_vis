@@ -59,6 +59,38 @@ class LinemapTests(unittest.TestCase):
         self.assertEqual(lm.get(3), ("a.f90", 2))
 
 
+class FparserLineMapTests(unittest.TestCase):
+    def test_facts_use_original_source_lines(self):
+        # Simulate cpp inserting an include: clean text line numbers no longer
+        # match the original file after the include.
+        from dataflow.frontends import fortran_fparser
+        raw = (
+            '# 1 "orig.f90"\n'
+            "module m\n"
+            "  use iso_c_binding\n"
+            '# 1 "inc.inc"\n'
+            + "! include padding\n" * 10 +
+            '# 4 "orig.f90"\n'
+            "contains\n"
+            "subroutine s(a)\n"
+            "  integer, intent(in) :: a\n"
+            "  integer :: x\n"
+            "  x = a\n"
+            "end subroutine s\n"
+            "end module m\n"
+        )
+        text, lm = build_line_map(raw, "orig.f90")
+        facts = fortran_fparser.parse("orig.f90", "orig.f90", text, lm, "cpu-gcc")
+        proc = facts["procedures"][0]
+        self.assertEqual(facts["modules"][0]["line"], 1)
+        self.assertEqual(facts["modules"][0]["uses"][0]["line"], 2)
+        self.assertEqual(proc["line"], 5)
+        self.assertEqual(proc["end_line"], 9)
+        self.assertEqual(proc["params"][0]["line"], 6)
+        self.assertEqual(proc["decls"][1]["line"], 7)
+        self.assertEqual(proc["stmts"][0]["line"], 8)
+
+
 class PathTests(unittest.TestCase):
     def test_subscripts_on_every_component(self):
         from dataflow.facts import normalize_path, scan_paths

@@ -76,7 +76,12 @@ def _sha1(text: str) -> str:
 
 
 def _safe_name(text: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", text or "unknown").strip("_") or "unknown"
+    # Component names can be "." or ".." (functions whose source lives outside
+    # the model root). Kept verbatim they produce shard paths like
+    # ``fn/...json``, which static servers and IDE dev servers reject as a path
+    # traversal attempt, so shard names never contain a dot.
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", text or "").strip("_")
+    return name or "unknown"
 
 
 def _rel(path: str | None, root: str | None) -> str:
@@ -573,7 +578,17 @@ def build_graph(functions: dict[str, dict], calls: list[dict], file_meta: dict,
         if comp not in comp_index:
             comp_index[comp] = len(components)
             components.append(comp)
-    shards = [f"fn/{_safe_name(c)}.json" for c in components]
+    shards: list[str] = []
+    used_shard_names: set[str] = set()
+    for component in components:
+        base = _safe_name(component)
+        candidate = base
+        suffix = 2
+        while candidate in used_shard_names:
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        used_shard_names.add(candidate)
+        shards.append(f"fn/{candidate}.json")
 
     folders: list[str] = []
     folder_index: dict[str, int] = {}
@@ -956,12 +971,20 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
                 "node": origin_event[0],
             }
         else:
-            # Searchable group with no accesses (e.g. an unused parameter):
-            # point at the function that owns it.
+            # Searchable group with no accesses (e.g. an unread parameter):
+            # point at the declaration when it is a dummy argument, otherwise
+            # at the function that owns it.
             owner = _owner_function(rec["entity"])
             node = node_by_fn.get(owner)
+            line = functions.get(owner, {}).get("line")
+            if rec["entity"].startswith("param:"):
+                pname = rec["entity"].rsplit("::", 1)[-1]
+                for proc_param in functions.get(owner, {}).get("params") or []:
+                    if proc_param.get("name") == pname and proc_param.get("line"):
+                        line = proc_param.get("line")
+                        break
             rec["origin"] = {
-                "fn": node, "line": functions.get(owner, {}).get("line"),
+                "fn": node, "line": line,
                 "entity": rec["entity"], "file": functions.get(owner, {}).get("file"),
                 "name": functions.get(owner, {}).get("name"), "node": node,
             }
@@ -1150,6 +1173,31 @@ def _build_backward(param: str, incoming: dict[str, list[dict]], group_of: dict,
 # function parameter shards
 # --------------------------------------------------------------------------- #
 
+def _has_trace_path(chain: list[list] | None) -> bool:
+    """True when a backward chain contains a real link to a caller.
+
+    ``_build_backward`` always starts with a synthetic owner step (line 0,
+    upstream -1). A single such step means the extractor found neither an
+    incoming pass nor a direct event, so there is nothing to trace.
+    """
+    if not chain:
+        return False
+    first = chain[0] or []
+    if len(chain) > 1:
+        return True
+    return bool(first[1]) or (len(first) > 4 and first[4] is not None and first[4] >= 0)
+
+
+def _entity_event_count(group: dict, entity: str) -> int:
+    """Count event rows whose entity is exactly ``entity`` (not a merged alias)."""
+    entities = group.get("entities") or []
+    try:
+        index = entities.index(entity)
+    except ValueError:
+        return 0
+    return sum(1 for ev in group.get("events") or [] if len(ev) > 4 and ev[4] == index)
+
+
 def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
                           vis_dir: str) -> dict:
     functions = source["functions"]
@@ -1160,6 +1208,28 @@ def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
     shards = graph["fnShards"]
     comp_index = {c: i for i, c in enumerate(components)}
     payloads: list[dict] = [dict() for _ in shards]
+
+    # Incoming pass sites per formal parameter, used only to explain where a
+    # parameter without events came from. Deduplicate repeated call rows.
+    incoming_sources: dict[str, list[dict]] = defaultdict(list)
+    seen_sources: dict[str, set[tuple[str, int]]] = defaultdict(set)
+    for p in source.get("passes") or []:
+        formal = canonical_field_entity(p.get("formal") or "", source["types"])
+        if not formal:
+            continue
+        caller = p.get("caller")
+        line = p.get("line") or 0
+        key = (caller, line)
+        if key in seen_sources[formal]:
+            continue
+        seen_sources[formal].add(key)
+        caller_proc = functions.get(caller) or {}
+        caller_file = (file_meta.get(caller_proc.get("file") or "", {}) or {}).get("rel_path")
+        incoming_sources[formal].append({
+            "n": caller_proc.get("name") or caller,
+            "f": caller_file or _rel(caller_proc.get("file"), model_root),
+            "l": line,
+        })
 
     for pid, node in node_by_fn.items():
         proc = functions.get(pid)
@@ -1183,7 +1253,7 @@ def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
                               (64, "by_ref"), (128, "const")):
                 if p.get(key):
                     flags |= flag
-            params.append({
+            param_row = {
                 "n": pname,
                 "t": p.get("type"),
                 "r": p.get("rank") or 0,
@@ -1192,7 +1262,20 @@ def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
                 "f": flags,
                 "g": gid,
                 "l": p.get("line"),
-            })
+            }
+            group = trace.groups.get(gid) or {}
+            chain = (group.get("backward") or {}).get(entity)
+            if not _has_trace_path(chain) and not _entity_event_count(group, entity):
+                # Declared and possibly passed in, but the extractor recorded no
+                # read/write/pass event with a usable source location.
+                param_row["np"] = 1
+                sources = sorted(
+                    incoming_sources.get(entity, []),
+                    key=lambda s: (s.get("l") or 0, s.get("n") or ""),
+                )[:8]
+                if sources:
+                    param_row["src"] = sources
+            params.append(param_row)
         payloads[shard][pid] = {
             "id": pid,
             "name": proc.get("name"),

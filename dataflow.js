@@ -8,11 +8,27 @@
  */
 "use strict";
 
+// A Worker can be created successfully and still never run a single message:
+// extensions such as JShelter replace `window.Worker` with a stub (and log
+// "Permission denied to access object" while doing it), sandboxed pages and
+// strict policies can block worker scripts, and a crashed worker stays silent.
+// Waiting on such a worker forever left the parameter card on "Loading
+// parameters…", so requests have deadlines and the main-thread fallback is used
+// whenever the worker does not answer.
+const WORKER_FIRST_REQUEST_TIMEOUT_MS = 5000;
+const WORKER_REQUEST_TIMEOUT_MS = 15000;
+// Give a freshly created worker time to boot before checking whether it answered.
+const WORKER_LIVENESS_DELAY_MS = 1500;
+
 class DataflowClient {
     constructor(base) {
         this.base = base || "vis/";
         this.worker = null;
         this.workerReady = null;
+        this.workerDisabled = false;
+        // True once the worker has sent at least one message. A worker that
+        // never answers is dead even though `new Worker` succeeded.
+        this.workerAlive = false;
         this.pending = new Map();
         this.nextId = 1;
         this.fallback = {
@@ -25,42 +41,135 @@ class DataflowClient {
     init() {
         if (this.workerReady) return this.workerReady;
         this.workerReady = new Promise((resolve) => {
+            let worker;
             try {
-                this.worker = new Worker("dataflow-worker.js");
-                this.worker.onmessage = (event) => this._onMessage(event.data);
-                this.worker.onerror = () => {
-                    this.worker = null;
-                    for (const [, waiter] of this.pending) {
-                        waiter.reject(new Error("dataflow worker crashed"));
-                    }
-                    this.pending.clear();
-                    resolve(false);
-                };
-                this.worker.postMessage({ id: 0, type: "init", payload: { base: this.base } });
-                resolve(true);
+                worker = new Worker("dataflow-worker.js");
             } catch (err) {
-                this.worker = null;
+                this.workerDisabled = true;
                 resolve(false);
+                return;
             }
+
+            this.worker = worker;
+            worker.onmessage = (event) => {
+                this.workerAlive = true;
+                const msg = event.data || {};
+                if (msg.id !== 0) this._onMessage(msg);
+            };
+            worker.onerror = (event) => {
+                const message = event && event.message ? event.message : "dataflow worker crashed";
+                this._disableWorker(new Error(message));
+            };
+            worker.onmessageerror = () => {
+                this._disableWorker(new Error("dataflow worker message could not be deserialized"));
+            };
+
+            try {
+                worker.postMessage({ id: 0, type: "init", payload: { base: this.base } });
+            } catch (err) {
+                this._disableWorker(err);
+                resolve(false);
+                return;
+            }
+
+            // Do not use a plain wall-clock timer here: the first layout blocks
+            // the main thread, and a queued worker reply is only processed after
+            // that block. An idle callback is queued behind the reply, so a live
+            // worker has always answered by the time this runs.
+            const probe = () => {
+                if (this.workerAlive || this.workerDisabled) return;
+                setTimeout(() => {
+                    if (!this.workerAlive && !this.workerDisabled) {
+                        this._disableWorker(new Error("dataflow worker did not respond"));
+                    }
+                }, WORKER_LIVENESS_DELAY_MS);
+            };
+            if (typeof requestIdleCallback === "function") {
+                requestIdleCallback(probe, { timeout: 8000 });
+            } else {
+                setTimeout(probe, WORKER_LIVENESS_DELAY_MS + 2000);
+            }
+
+            resolve(true);
         });
         return this.workerReady;
     }
 
+    // Stop using the worker and serve everything that was waiting (plus all
+    // future requests) from the main thread.
+    _disableWorker(err) {
+        if (this.workerDisabled) return;
+        this.workerDisabled = true;
+        this.workerAlive = false;
+        const worker = this.worker;
+        this.worker = null;
+        if (worker) {
+            try { worker.terminate(); } catch (ignored) { /* already gone */ }
+        }
+        const pending = [...this.pending.values()];
+        this.pending.clear();
+        for (const waiter of pending) {
+            clearTimeout(waiter.timer);
+            this._fallback(waiter.type, waiter.payload).then(waiter.resolve, waiter.reject);
+        }
+        if (err && typeof console !== "undefined") {
+            console.warn("dataflow worker unavailable, loading on the main thread:", err.message || err);
+        }
+    }
+
     _onMessage(msg) {
+        if (!msg) return;
         const waiter = this.pending.get(msg.id);
         if (!waiter) return;
-        this.pending.delete(msg.id);
+        clearTimeout(waiter.timer);
         if (msg.ok) waiter.resolve(msg.result);
         else waiter.reject(new Error(msg.error || "dataflow worker error"));
     }
 
     _request(type, payload) {
         return this.init().then((hasWorker) => {
-            if (!hasWorker || !this.worker) return this._fallback(type, payload);
+            if (!hasWorker || !this.worker || this.workerDisabled) return this._fallback(type, payload);
+            const worker = this.worker;
             const id = this.nextId++;
             return new Promise((resolve, reject) => {
-                this.pending.set(id, { resolve, reject });
-                this.worker.postMessage({ id, type, payload });
+                let settled = false;
+                const waiter = {
+                    type,
+                    payload,
+                    resolve: (value) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(waiter.timer);
+                        this.pending.delete(id);
+                        resolve(value);
+                    },
+                    reject: (error) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(waiter.timer);
+                        this.pending.delete(id);
+                        reject(error);
+                    }
+                };
+                waiter.timer = setTimeout(() => {
+                    if (!this.workerAlive) {
+                        // Nothing was ever received: the worker is a stub. Drop
+                        // it and retry every pending request on the main thread.
+                        this._disableWorker(new Error(`dataflow worker did not answer ${type}`));
+                        return;
+                    }
+                    // A worker that has answered before is merely slow (or the
+                    // page was busy). Serve this one request on the main thread
+                    // without tearing the worker down.
+                    this.pending.delete(id);
+                    this._fallback(type, payload).then(waiter.resolve, waiter.reject);
+                }, this.workerAlive ? WORKER_REQUEST_TIMEOUT_MS : WORKER_FIRST_REQUEST_TIMEOUT_MS);
+                this.pending.set(id, waiter);
+                try {
+                    worker.postMessage({ id, type, payload });
+                } catch (err) {
+                    this._disableWorker(err);
+                }
             });
         });
     }
@@ -152,6 +261,23 @@ class DataflowClient {
 // --------------------------------------------------------------------------
 
 const TRACE_ROLE = { CREATE: 1, WRITE: 2, READ: 4, PASS: 8 };
+// vis.py stores the via index in backward-chain step[2] for ordinary steps,
+// and overwrites it with a ROLE bitmask when the chain resolves a real
+// creation/write origin. VIA_INDEX["pass"] is 6 in the exporter.
+const BACKWARD_VIA_PASS = 6;
+
+/**
+ * True when a backward chain has a real caller/origin link. The exporter always
+ * emits a synthetic owner step (line 0, upstream -1) for a parameter, so a
+ * single such step is not a traceable path.
+ */
+function traceHasBackwardPath(trace, paramEntity) {
+    const chain = trace && trace.backward && trace.backward[paramEntity];
+    if (!Array.isArray(chain) || !chain.length) return false;
+    if (chain.length > 1) return true;
+    const step = chain[0] || [];
+    return !!step[1] || (step[4] !== null && step[4] !== undefined && step[4] >= 0);
+}
 
 function dataTraceRoleNames(mask) {
     const names = [];
@@ -192,9 +318,11 @@ function buildDataTraceView(trace, mode, paramEntity) {
         chain.forEach((step, index) => {
             const fn = step[0];
             const upstream = step[4];
-            const role = step[2] || TRACE_ROLE.PASS;
+            const rawRole = step[2];
+            const role = rawRole === BACKWARD_VIA_PASS
+                ? TRACE_ROLE.PASS
+                : (rawRole || TRACE_ROLE.PASS);
             addRole(fn, role);
-            if (index === chain.length - 1) addRole(fn, TRACE_ROLE.CREATE);
             if (!steps.has(fn)) steps.set(fn, index + 1);
             addEvent(fn, { line: step[1], role, entity: step[3], upstream });
             if (upstream !== null && upstream !== undefined && upstream >= 0) {
@@ -203,8 +331,11 @@ function buildDataTraceView(trace, mode, paramEntity) {
         });
         const last = chain[chain.length - 1];
         if (last && last[0] !== undefined) originFn = last[0];
-        originFile = last ? last[5] : (trace.origin && trace.origin.file);
-        originLine = last ? last[1] : (trace.origin && trace.origin.line);
+        originFile = (last && last[5]) || (trace.origin && trace.origin.file);
+        // A line of 0 means the extractor could not attribute the step to a
+        // concrete source line (typically a dummy-argument binding). Fall back
+        // to the origin recorded with the trace so we do not show "line ?".
+        originLine = (last && last[1]) || (trace.origin && trace.origin.line);
     } else {
         for (const ev of trace.events || []) {
             const fn = ev[0];
@@ -227,6 +358,9 @@ function buildDataTraceView(trace, mode, paramEntity) {
 
     const folderCounts = new Map(trace.folders || []);
     const fileCounts = new Map(trace.files || []);
+    const originMask = (originFn !== undefined && originFn !== null)
+        ? (roles.get(originFn) || 0)
+        : 0;
     return {
         trace,
         mode,
@@ -240,6 +374,10 @@ function buildDataTraceView(trace, mode, paramEntity) {
         originFile,
         originName,
         originLine,
+        // Whether the earliest point really is a CREATE event. Backward chains
+        // used to mark their last step as CREATE unconditionally, which made a
+        // dummy argument look like it was created in the caller.
+        originCreated: !!(originMask & TRACE_ROLE.CREATE),
         counts: trace.counts || {},
         folderCounts,
         fileCounts,
@@ -270,6 +408,7 @@ if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         DataflowClient,
         buildDataTraceView,
+        traceHasBackwardPath,
         dataTraceRoleNames,
         formatIntent,
         intentMismatch,

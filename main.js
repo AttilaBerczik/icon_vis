@@ -29,6 +29,10 @@ let currentTraceLabel = null;
 let roleFilterMask = 15;
 let includePasses = true;
 let searchMode = "functions";
+
+// Used by panel.js to avoid adding a call-graph selection highlight on top of
+// an active data trace.
+window.isDataTraceActive = () => !!currentTrace;
 let dataSearchResults = [];
 let dataSearchSelection = -1;
 
@@ -967,7 +971,11 @@ function openParamCard(nodeId, pin) {
             paramCardData = data;
             renderParamCard(rec, data);
         })
-        .catch(() => renderParamCard(rec, null));
+        .catch((err) => {
+            if (paramCardNodeId !== nodeId) return;
+            console.warn(`Could not load parameters for ${rec.name}:`, err);
+            renderParamCard(rec, null, err);
+        });
 }
 
 function closeParamCard() {
@@ -977,8 +985,101 @@ function closeParamCard() {
     const card = document.getElementById("param-card");
     if (card) card.style.display = "none";
 }
+window.closeParamCard = closeParamCard;
 
-function renderParamCard(rec, data) {
+function graphCallersOf(nodeId) {
+    if (!parsedGraph || !parsedGraph.edges || nodeId === undefined || nodeId === null) return [];
+    const records = (parsedGraph.meta && parsedGraph.meta.nodeRecords) || [];
+    const callers = [];
+    for (const [from, targets] of parsedGraph.edges) {
+        if (targets.has(nodeId)) callers.push(from);
+    }
+    return callers.map((id) => {
+        const rec = records[id] || {};
+        return { n: rec.name || String(id), f: rec.file || "", l: rec.line || 0, node: id };
+    }).sort((a, b) => (a.f || "").localeCompare(b.f || "") || (a.l || 0) - (b.l || 0));
+}
+
+function buildParamNoPathDetails(data, param) {
+    const box = document.createElement("div");
+    box.className = "param-no-path-details";
+
+    const declared = document.createElement("div");
+    declared.className = "param-no-path-loc";
+    const file = (data && (data.file || data.abs)) || "";
+    const line = param.l ? `:${param.l}` : "";
+    declared.textContent = file
+        ? `Declared at ${file}${line}`
+        : "Declaration location not recorded";
+    box.appendChild(declared);
+
+    const explicitSources = Array.isArray(param.src) ? param.src : [];
+    const nodeId = parsedGraph && parsedGraph.meta && parsedGraph.meta.functionToNode
+        ? parsedGraph.meta.functionToNode.get(data && data.id)
+        : null;
+    const sources = explicitSources.length ? explicitSources : graphCallersOf(nodeId).slice(0, 8);
+
+    if (sources.length) {
+        const label = document.createElement("div");
+        label.className = "param-no-path-label";
+        label.textContent = explicitSources.length
+            ? "Passed in from:"
+            : "Routine callers (call argument binding not resolved):";
+        box.appendChild(label);
+
+        const list = document.createElement("ul");
+        list.className = "param-no-path-sources";
+        sources.forEach((source) => {
+            const item = document.createElement("li");
+            const loc = source.f ? `${source.f}${source.l ? `:${source.l}` : ""}` : "";
+            const name = source.n || "caller";
+            item.textContent = loc ? `${name} — ${loc}` : name;
+            list.appendChild(item);
+        });
+        box.appendChild(list);
+    } else {
+        const none = document.createElement("div");
+        none.className = "param-no-path-label";
+        none.textContent = "No caller binding was recorded for this parameter.";
+        box.appendChild(none);
+    }
+
+    const note = document.createElement("div");
+    note.className = "param-no-path-note";
+    note.textContent = "No read/write/pass events were recorded, so there is no lifecycle path to open.";
+    box.appendChild(note);
+    return box;
+}
+
+function updateParamExpandState(row) {
+    const button = row.querySelector(".param-expand");
+    if (button) {
+        button.setAttribute("aria-expanded", row.classList.contains("is-expanded") ? "true" : "false");
+    }
+}
+
+function toggleParamNoPathDetails(row, data, param) {
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains("param-no-path-details")) {
+        next.remove();
+        row.classList.remove("is-expanded");
+        updateParamExpandState(row);
+        return;
+    }
+    const card = row.closest(".param-card");
+    if (card) {
+        card.querySelectorAll(".param-row.is-expanded").forEach((other) => {
+            other.classList.remove("is-expanded");
+            updateParamExpandState(other);
+        });
+        card.querySelectorAll(".param-no-path-details").forEach((el) => el.remove());
+    }
+    row.classList.add("is-expanded");
+    row.after(buildParamNoPathDetails(data, param));
+    updateParamExpandState(row);
+}
+
+function renderParamCard(rec, data, error) {
     const card = document.getElementById("param-card");
     if (!card) return;
     card.innerHTML = "";
@@ -1037,7 +1138,9 @@ function renderParamCard(rec, data) {
     if (!data) {
         const msg = document.createElement("div");
         msg.className = "param-card-empty";
-        msg.textContent = "No parameter data for this node.";
+        msg.textContent = error
+            ? `Could not load parameter data (${error.message || error}).`
+            : "No parameter data for this node.";
         card.appendChild(msg);
         return;
     }
@@ -1045,9 +1148,12 @@ function renderParamCard(rec, data) {
     const rows = document.createElement("div");
     rows.className = "param-card-rows";
     (data.params || []).forEach((param) => {
+        const noPath = !!param.np;
         const row = document.createElement("div");
-        row.className = "param-row";
-        row.title = "Click to trace this parameter back to its origin";
+        row.className = "param-row" + (noPath ? " param-row-no-path" : "");
+        row.title = noPath
+            ? "Click to see its declaration and callers; no read/write/pass path was recorded"
+            : "Click to trace this parameter back to its origin";
 
         const chip = document.createElement("span");
         chip.className = `intent-chip intent-${(param.i || "none").toLowerCase()}`;
@@ -1076,24 +1182,52 @@ function renderParamCard(rec, data) {
             row.appendChild(warn);
         }
 
-        const flow = document.createElement("button");
-        flow.type = "button";
-        flow.className = "param-flow";
-        flow.title = "Show the full flow";
-        flow.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
-            + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
-            + `<path d="M8 3H3v5"></path><path d="M16 3h5v5"></path>`
-            + `<path d="M8 21H3v-5"></path><path d="M16 21h5v-5"></path></svg>`;
-        flow.addEventListener("click", (e) => {
-            e.stopPropagation();
-            if (!param.g) return;
-            startTrace(param.g, "full", null, `${data.name} · ${param.n}`);
-        });
-        row.appendChild(flow);
+        if (noPath) {
+            const noPathBadge = document.createElement("span");
+            noPathBadge.className = "param-no-path";
+            noPathBadge.textContent = "no path";
+            noPathBadge.title = "No read/write/pass events were recorded for this parameter";
+            row.appendChild(noPathBadge);
+        }
+
+        if (noPath) {
+            const expand = document.createElement("button");
+            expand.type = "button";
+            expand.className = "param-expand";
+            expand.title = "Open declaration and callers";
+            expand.setAttribute("aria-expanded", "false");
+            expand.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+                + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+                + `<path d="M5 8h14l-7 9-7-9Z"></path></svg>`;
+            expand.addEventListener("click", (e) => {
+                e.stopPropagation();
+                toggleParamNoPathDetails(row, data, param);
+            });
+            row.appendChild(expand);
+        } else {
+            const flow = document.createElement("button");
+            flow.type = "button";
+            flow.className = "param-flow";
+            flow.title = "Show the full flow";
+            flow.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+                + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+                + `<path d="M8 3H3v5"></path><path d="M16 3h5v5"></path>`
+                + `<path d="M8 21H3v-5"></path><path d="M16 21h5v-5"></path></svg>`;
+            flow.addEventListener("click", (e) => {
+                e.stopPropagation();
+                if (!param.g) return;
+                startTrace(param.g, "full", null, `${data.name} · ${param.n}`);
+            });
+            row.appendChild(flow);
+        }
 
         row.addEventListener("click", (e) => {
             e.stopPropagation();
             if (!param.g) return;
+            if (noPath) {
+                toggleParamNoPathDetails(row, data, param);
+                return;
+            }
             const entity = `param:${data.id}::${param.n}`;
             startTrace(param.g, "backward", entity, `${data.name} · ${param.n}`);
         });
@@ -1133,11 +1267,22 @@ function updateOverlayPositions() {
         return { x, y, w: (dims ? dims.w : 80) * transform.k, h: (dims ? dims.h : 30) * transform.k };
     };
 
+    // Overlays belong to the graph pane; never let them cover the docked
+    // inspector when it is open.
+    const leftPanelEl = document.getElementById("left-panel");
+    const paneRight = leftPanelEl ? leftPanelEl.getBoundingClientRect().right : window.innerWidth;
+
     const pill = document.getElementById("param-pill");
     if (pill && paramPillNodeId !== null) {
         const p = positionFor(paramPillNodeId);
         if (p) {
-            pill.style.left = `${p.x + p.w / 2 + 8}px`;
+            const pillWidth = pill.offsetWidth || 90;
+            let pillLeft = p.x + p.w / 2 + 8;
+            if (pillLeft + pillWidth > paneRight - 8) {
+                pillLeft = p.x - p.w / 2 - pillWidth - 8;
+            }
+            pillLeft = Math.max(8, Math.min(pillLeft, paneRight - pillWidth - 8));
+            pill.style.left = `${pillLeft}px`;
             pill.style.top = `${p.y - p.h / 2}px`;
         } else {
             pill.style.display = "none";
@@ -1152,8 +1297,14 @@ function updateOverlayPositions() {
             return;
         }
         const width = card.offsetWidth || 340;
+        const rightLimit = paneRight - 12;
         let left = p.x + p.w / 2 + 14;
-        if (left + width > window.innerWidth - 12) left = p.x - p.w / 2 - width - 14;
+        if (left + width > rightLimit) left = p.x - p.w / 2 - width - 14;
+        if (left + width > rightLimit) {
+            // Not enough room beside the node inside the graph pane.
+            closeParamCard();
+            return;
+        }
         left = Math.max(12, left);
         let top = p.y - p.h / 2;
         top = Math.max(12, Math.min(top, window.innerHeight - (card.offsetHeight || 300) - 12));
@@ -1178,7 +1329,7 @@ function startTrace(groupId, mode, paramEntity, label) {
             return;
         }
         let effectiveMode = mode === "backward" ? "backward" : "full";
-        if (effectiveMode === "backward" && !(trace.backward && trace.backward[paramEntity])) {
+        if (effectiveMode === "backward" && !traceHasBackwardPath(trace, paramEntity)) {
             effectiveMode = "full";
         }
         currentTrace = trace;
@@ -1282,6 +1433,10 @@ function showTraceBar(view) {
         origin.textContent = `${name} · ${shortPath(file)}:${view.originLine || "?"}`;
         origin.title = file ? `${file}:${view.originLine || ""}` : "";
     }
+    const jumpBtn = document.getElementById("trace-jump-origin");
+    if (jumpBtn) {
+        jumpBtn.textContent = view.originCreated ? "Jump to origin" : "Jump to first use";
+    }
 }
 
 function shortPath(path) {
@@ -1313,7 +1468,8 @@ if (traceJump) {
         if (!currentTraceView) return;
         const container = d3.select("#visualization").node();
         if (container && typeof container.centerNode === "function") container.centerNode(currentTraceView.originFn, 0.9);
-        if (container && typeof container.selectNode === "function") container.selectNode(currentTraceView.originFn);
+        // Do not select the node here: the trace overlay already highlights it,
+        // and a selection would add the whole call-graph closure on top.
     });
 }
 const traceInclude = document.getElementById("trace-include-propagated");

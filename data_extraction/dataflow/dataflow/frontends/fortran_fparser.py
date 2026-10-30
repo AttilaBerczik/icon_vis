@@ -37,6 +37,45 @@ def _text(node) -> str:
         return ""
 
 
+def _remap_facts(facts: dict, linemap: LineMap) -> None:
+    """Replace preprocessed line numbers with original source line numbers.
+
+    fparser reports positions in the text produced by ``cpp``. That text has
+    include contents inserted and inactive ``#if`` branches removed, so a
+    position is only equal to the source line in files without preprocessing
+    changes. Every fact that carries a ``line``/``end_line`` is mapped back
+    through the file's :class:`LineMap`.
+    """
+    seen: set[int] = set()
+
+    def remap(item) -> None:
+        if not isinstance(item, dict) or id(item) in seen:
+            return
+        seen.add(id(item))
+        for key in ("line", "end_line"):
+            value = item.get(key)
+            if value:
+                item[key] = linemap.get(value)[1]
+
+    for module in facts.get("modules", []) or []:
+        remap(module)
+        for use in module.get("uses", []) or []:
+            remap(use)
+        for iface in module.get("interfaces", []) or []:
+            remap(iface)
+    for typ in facts.get("types", []) or []:
+        remap(typ)
+        for field in typ.get("fields", []) or []:
+            remap(field)
+    for var in facts.get("module_vars", []) or []:
+        remap(var)
+    for proc in facts.get("procedures", []) or []:
+        remap(proc)
+        for key in ("params", "decls", "uses", "aliases", "stmts", "exec_markers"):
+            for item in proc.get(key, []) or []:
+                remap(item)
+
+
 def _extract_paths(text: str) -> list[str]:
     """Extract candidate access paths from an expression.
 
@@ -556,9 +595,6 @@ def parse(path: str, rel_path: str, text: str, linemap: LineMap, profile: str) -
     ast = parser(FortranStringReader(text, ignore_comments=False))
     main_file = path
 
-    def rel_line(node) -> int:
-        return linemap.get(_line(node))[1]
-
     for module_node in walk(ast, F.Module):
         mstmt = next((c for c in (module_node.children or [])
                       if c is not None and type(c).__name__ == "Module_Stmt"), None)
@@ -611,7 +647,7 @@ def parse(path: str, rel_path: str, text: str, linemap: LineMap, profile: str) -
         facts["modules"].append({
             "name": mod_name,
             "file": path,
-            "line": rel_line(mstmt),
+            "line": _line(mstmt),
             "uses": uses,
             "interfaces": interfaces,
             "default_private": default_private,
@@ -658,7 +694,7 @@ def parse(path: str, rel_path: str, text: str, linemap: LineMap, profile: str) -
         pseudo = {
             "id": pid, "name": name, "module": None, "host": None, "kind": "program",
             "lang": "fortran", "file": main_file, "profile": profile,
-            "line": rel_line(stmt) if stmt is not None else 0, "end_line": rel_line(prog_node),
+            "line": _line(stmt) if stmt is not None else 0, "end_line": _line(prog_node),
             "params": [], "decls": [], "uses": [], "result": None, "bind_c": None,
             "attrs": [], "aliases": [], "stmts": [], "exec_markers": [],
         }
@@ -698,6 +734,7 @@ def parse(path: str, rel_path: str, text: str, linemap: LineMap, profile: str) -
     for p in facts["procedures"]:
         uniq.setdefault(p["id"], p)
     facts["procedures"] = list(uniq.values())
+    _remap_facts(facts, linemap)
     return facts
 
 

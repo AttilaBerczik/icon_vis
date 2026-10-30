@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -142,6 +144,69 @@ class FieldMergeTests(unittest.TestCase):
             vis.canonical_field_entity("field:not_a_real_type%x", TYPES),
             "field:not_a_real_type%x",
         )
+
+
+class ShardNameTests(unittest.TestCase):
+    def test_safe_name_drops_dots(self):
+        # "." / ".." are real component names for sources outside the model
+        # root; shard paths must never contain "..".
+        for value in (".", "..", "...", "a..b", "a.b"):
+            name = vis._safe_name(value)
+            self.assertNotIn(".", name)
+            self.assertTrue(name)
+        self.assertEqual(vis._safe_name("atm_phy_schemes"), "atm_phy_schemes")
+
+    def test_shard_names_are_secure_and_unique(self):
+        src = make_source()
+        meta = dict(src["file_meta"])
+        meta["/m/src/a/mod_a.f90"] = {"rel_path": "src/a/mod_a.f90", "component": ".."}
+        meta["/m/src/b/mod_b.f90"] = {"rel_path": "src/b/mod_b.f90", "component": "."}
+        graph = vis.build_graph(src["functions"], src["calls"], meta, "/m")
+        shards = graph["fnShards"]
+        self.assertEqual(len(shards), len(set(shards)))
+        for shard in shards:
+            self.assertNotIn("..", shard)
+            self.assertEqual(shard.count("."), 1)
+            self.assertTrue(shard.startswith("fn/") and shard.endswith(".json"))
+
+
+class ParameterPathTests(unittest.TestCase):
+    def test_synthetic_owner_step_is_not_a_path(self):
+        self.assertFalse(vis._has_trace_path(None))
+        self.assertFalse(vis._has_trace_path([]))
+        self.assertFalse(vis._has_trace_path([[1, 0, 6, 0, -1, "/m/f.f90"]]))
+        self.assertTrue(vis._has_trace_path([[1, 12, 6, 0, -1, "/m/f.f90"]]))
+        self.assertTrue(vis._has_trace_path([
+            [1, 0, 6, 0, 2, "/m/f.f90"],
+            [2, 0, 6, 0, -1, "/m/f.f90"],
+        ]))
+
+    def test_parameter_without_events_is_marked_no_path(self):
+        src = make_source()
+        # Remove every binding for g::rho so the only remaining step is the
+        # synthetic owner step emitted by _build_backward.
+        src["passes"] = [p for p in src["passes"]
+                         if p["formal"] != "param:mod_b::g::rho"]
+        src["accesses"] = [a for a in src["accesses"]
+                           if a["entity"] != "param:mod_b::g::rho"]
+        graph = vis.build_graph(
+            src["functions"], src["calls"], src["file_meta"], "/m"
+        )
+        trace = vis.build_traces(src, graph)
+        with tempfile.TemporaryDirectory() as tmp:
+            vis.build_function_shards(src, graph, trace, tmp)
+            functions = {}
+            for shard in graph["fnShards"]:
+                with open(os.path.join(tmp, shard), encoding="utf-8") as fh:
+                    functions.update(json.load(fh)["functions"])
+
+        no_path = {p["n"]: p for p in functions["mod_b::g"]["params"]}
+        self.assertEqual(no_path["rho"].get("np"), 1)
+        self.assertNotIn("src", no_path["rho"])
+
+        # a::f::rho is passed in from main, so it keeps a usable path.
+        with_path = {p["n"]: p for p in functions["mod_a::f"]["params"]}
+        self.assertNotIn("np", with_path["rho"])
 
 
 class StaticOrderTests(unittest.TestCase):

@@ -90,6 +90,11 @@ class DetailPanelManager {
             return null;
         }
 
+        // The floating parameter card duplicates information that now lives in
+        // the docked panel, and used to stay on top of it. Hide it as soon as a
+        // tab is opened; it can be reopened from the graph when needed.
+        if (typeof window.closeParamCard === "function") window.closeParamCard();
+
         // Check if tab already exists for this node
         const existingTab = this.tabs.find(t => t.nodeId === nodeId);
         if (existingTab) {
@@ -110,7 +115,6 @@ class DetailPanelManager {
                 this.detailPanel.style.width = `${initialWidth}px`;
             }
         }
-
         const rawLabel = this.nodes.get(nodeId);
         const labelInfo = parseNodeLabel(rawLabel);
         const functionName = labelInfo.lines[labelInfo.lines.length - 1];
@@ -203,6 +207,8 @@ class DetailPanelManager {
      */
     openLifecycle(trace, view, paramEntity, titleOverride) {
         if (!trace) return null;
+        // Keep the floating parameter card out of the docked panel's way.
+        if (typeof window.closeParamCard === "function") window.closeParamCard();
         const key = `lifecycle:${trace.id}:${paramEntity || ""}:${view ? view.mode : "full"}`;
         const existing = this.tabs.find(t => t.lifecycleKey === key);
         if (existing) {
@@ -219,7 +225,6 @@ class DetailPanelManager {
                 this.detailPanel.style.width = `${initialWidth}px`;
             }
         }
-
         const tabId = "tab_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
         const label = titleOverride || trace.entity || "Lifecycle";
         const title = shortLifecycleName(label);
@@ -785,8 +790,9 @@ function lifecycleEntries(trace) {
     const entities = trace.entities || [];
     const vias = trace.vias || ["assign", "expr", "allocate", "read", "copy", "call", "pass"];
     const rows = [];
+    const seen = new Set();
     for (const ev of trace.events || []) {
-        rows.push({
+        const row = {
             fn: ev[0],
             line: ev[1],
             mask: ev[2],
@@ -794,7 +800,14 @@ function lifecycleEntries(trace) {
             entity: ev[4] >= 0 ? entities[ev[4]] : "",
             otherFn: ev[5] >= 0 ? ev[5] : null,
             otherEntity: ev[6] >= 0 ? entities[ev[6]] : ""
-        });
+        };
+        // The extractor can emit identical pass rows for the same call site.
+        // They are indistinguishable in the timeline, so show one of them.
+        const key = [row.fn, row.line, row.mask, row.via, row.entity,
+            row.otherFn, row.otherEntity].join("|");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push(row);
     }
     return rows;
 }
@@ -803,7 +816,11 @@ function centerNodeOnGraph(nodeId) {
     const container = document.getElementById("visualization");
     if (!container) return;
     if (typeof container.centerNode === "function") container.centerNode(nodeId, 0.9);
-    if (typeof container.selectNode === "function") container.selectNode(nodeId);
+    // While a data trace is active the trace overlay already marks every node
+    // and edge on the path. Selecting the node as well would highlight the
+    // full call-graph closure and bury the data path under unrelated edges.
+    const traceActive = typeof window.isDataTraceActive === "function" && window.isDataTraceActive();
+    if (!traceActive && typeof container.selectNode === "function") container.selectNode(nodeId);
 }
 
 function lifecycleRow(entry, nodes, trace) {
@@ -941,12 +958,23 @@ function renderLifecycleInContainer(trace, view, paramEntity, container, nodes) 
             line: view.originLine || origin.line
         };
     }
+    const createdHere = !!(view && view.originCreated);
+    const eventCount = (view && view.counts && Number.isFinite(view.counts.events))
+        ? view.counts.events
+        : (trace.events || []).length;
+    const noEvents = !createdHere && eventCount === 0;
     const here = document.createElement("div");
-    here.className = "lifecycle-start-title";
+    here.className = "lifecycle-start-title"
+        + (createdHere ? "" : noEvents ? " is-no-path" : " is-first-use");
+    const startIcon = createdHere
+        ? `<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.4l6.1-.9L12 3Z"></path>`
+        : noEvents
+            ? `<circle cx="12" cy="12" r="9"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path>`
+            : `<path d="M5 21V4"></path><path d="M5 4h10l-2 4 2 4H5"></path>`;
     here.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
         + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
-        + `<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.4l6.1-.9L12 3Z"></path></svg>`
-        + `<span>Start here</span>`;
+        + startIcon + `</svg>`
+        + `<span>${createdHere ? "Created here" : noEvents ? "No recorded path" : "First known use"}</span>`;
     start.appendChild(here);
 
     const fnLine = document.createElement("div");
@@ -960,6 +988,22 @@ function renderLifecycleInContainer(trace, view, paramEntity, container, nodes) 
     fileLine.textContent = fileText;
     fileLine.title = fileText;
     start.appendChild(fileLine);
+
+    if (!createdHere) {
+        const note = document.createElement("div");
+        note.className = "lifecycle-note";
+        const createCount = (view && view.counts ? view.counts.create : 0) || 0;
+        if (noEvents) {
+            note.textContent = "No read, write or pass event was recorded for this entity. "
+                + "For a parameter this usually means it was only declared and passed in; "
+                + "the extractor could not attribute a use to it.";
+        } else {
+            note.textContent = createCount > 0
+                ? "The trace does not start at a create event; an earlier creation may be outside the analysed code."
+                : "No create or write event is recorded for this entity. This is the earliest known use — usually a function argument or a value passed in by the caller.";
+        }
+        start.appendChild(note);
+    }
 
     const actions = document.createElement("div");
     actions.className = "lifecycle-start-actions";
@@ -981,7 +1025,7 @@ function renderLifecycleInContainer(trace, view, paramEntity, container, nodes) 
     const jump = document.createElement("button");
     jump.type = "button";
     jump.className = "lifecycle-copy";
-    jump.textContent = "Jump to origin";
+    jump.textContent = createdHere ? "Jump to origin" : noEvents ? "Jump to declaration" : "Jump to first use";
     jump.addEventListener("click", () => {
         if (origin.node !== undefined) centerNodeOnGraph(origin.node);
     });

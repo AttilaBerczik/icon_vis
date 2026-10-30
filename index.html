@@ -4,8 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="dark">
-    <meta name="theme-color" content="#18181B">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#F4F5F7">
     <title>Call Graph Workbench</title>
     <style>
         /* =========================================================================
@@ -18,36 +18,37 @@
            ========================================================================= */
 
         :root {
+            color-scheme: light;
             --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-            --bg-app: #18181B;
-            --bg-panel: #18181B;
-            --bg-surface: #202024;
-            --bg-raised: #27272C;
-            --bg-hover: #2D2D33;
-            --bg-canvas: #121214;
+            --bg-app: #F4F5F7;
+            --bg-panel: #FFFFFF;
+            --bg-surface: #FFFFFF;
+            --bg-raised: #EEF1F5;
+            --bg-hover: #E8ECF1;
+            --bg-canvas: #F8FAFC;
 
-            --border: #2E2E34;
-            --border-strong: #3F3F46;
+            --border: #DCE1E7;
+            --border-strong: #BCC5CF;
 
-            --text: #E4E4E7;
-            --text-muted: #9CA3AF;
-            --text-faint: #71717A;
+            --text: #1F2937;
+            --text-muted: #4B5563;
+            --text-faint: #64748B;
 
-            --accent: #3B82F6;
-            --accent-hover: #60A5FA;
-            --accent-soft: rgba(59, 130, 246, 0.16);
-            --amber: #F59E0B;
-            --amber-soft: rgba(245, 158, 11, 0.14);
-            --green: #34D399;
-            --green-soft: rgba(52, 211, 153, 0.13);
-            --teal: #2DD4BF;
-            --teal-soft: rgba(45, 212, 191, 0.12);
-            --violet: #A78BFA;
-            --violet-soft: rgba(167, 139, 250, 0.13);
-            --danger: #F87171;
-            --danger-soft: rgba(248, 113, 113, 0.14);
+            --accent: #2563EB;
+            --accent-hover: #1D4ED8;
+            --accent-soft: rgba(37, 99, 235, 0.10);
+            --amber: #B45309;
+            --amber-soft: rgba(245, 158, 11, 0.18);
+            --green: #047857;
+            --green-soft: rgba(5, 150, 105, 0.12);
+            --teal: #0F766E;
+            --teal-soft: rgba(13, 148, 136, 0.12);
+            --violet: #6D28D9;
+            --violet-soft: rgba(124, 58, 237, 0.10);
+            --danger: #DC2626;
+            --danger-soft: rgba(220, 38, 38, 0.10);
 
             --radius: 3px;
             --toolbar-h: 40px;
@@ -136,7 +137,7 @@
         }
 
         *::-webkit-scrollbar-thumb:hover {
-            background: #52525B;
+            background: #9CA3AF;
             border: 2px solid transparent;
             background-clip: padding-box;
         }
@@ -375,13 +376,13 @@
 
         .search-match-count.has-matches {
             background: var(--amber-soft);
-            border-color: rgba(245, 158, 11, 0.4);
-            color: #FCD34D;
+            border-color: rgba(180, 83, 9, 0.35);
+            color: #B45309;
         }
 
         .search-match-count.no-matches {
             background: var(--danger-soft);
-            border-color: rgba(248, 113, 113, 0.35);
+            border-color: rgba(220, 38, 38, 0.35);
             color: var(--danger);
         }
 
@@ -415,7 +416,7 @@
 
         .search-clear-btn:hover {
             background: var(--danger-soft);
-            border-color: rgba(248, 113, 113, 0.3);
+            border-color: rgba(220, 38, 38, 0.3);
             color: var(--danger);
         }
 
@@ -580,7 +581,7 @@
             position: relative;
             overflow: hidden;
             background-color: var(--bg-canvas);
-            background-image: radial-gradient(circle, #303036 1px, transparent 1px);
+            background-image: radial-gradient(circle, #D7DCE4 1px, transparent 1px);
             background-size: 16px 16px;
             background-position: 0 0;
             border: 0;
@@ -641,7 +642,7 @@
         }
 
         .degree-hat {
-            fill: #52525B;
+            fill: #A3ACB9;
             pointer-events: none;
         }
 
@@ -653,7 +654,7 @@
 
         .graph-edge {
             cursor: crosshair;
-            stroke: #3F3F46;
+            stroke: #C3CBD5;
             transition: stroke 0.1s ease;
         }
 
@@ -704,7 +705,7 @@
 
         /* Focused (hovered or clicked) node */
         .node-g.node-primary-highlight .node-rect {
-            fill: #172033 !important;
+            fill: #DBEAFE !important;
             stroke: var(--accent) !important;
             stroke-width: 2px !important;
             filter: none !important;
@@ -715,7 +716,7 @@
         }
 
         .node-g.node-primary-highlight .node-text {
-            fill: #FFFFFF !important;
+            fill: #1E3A8A !important;
         }
 
         .node-g.node-primary-highlight .node-text tspan {
@@ -728,14 +729,14 @@
 
         /* Adjacent nodes */
         .node-g.node-connected-highlight .node-rect {
-            fill: #1D4ED8 !important;
-            stroke: #3B82F6 !important;
+            fill: #EFF6FF !important;
+            stroke: #93C5FD !important;
             stroke-width: 1.5px !important;
             filter: none !important;
         }
 
         .node-g.node-connected-highlight .node-text {
-            fill: #FFFFFF !important;
+            fill: #1E40AF !important;
         }
 
         .node-g.node-connected-highlight .node-text tspan {
@@ -747,7 +748,7 @@
         }
 
         .node-g.node-connected-highlight.node-active-tab .node-rect {
-            fill: #78350F !important;
+            fill: #FDE68A !important;
             stroke: var(--amber) !important;
             stroke-width: 2px !important;
             filter: none !important;
@@ -755,14 +756,14 @@
 
         /* The node focused by the active side-panel tab */
         .node-g.node-active-tab .node-rect {
-            fill: #422006 !important;
+            fill: #FEF3C7 !important;
             stroke: var(--amber) !important;
             stroke-width: 2px !important;
             filter: none !important;
         }
 
         .node-g.node-active-tab .node-text {
-            fill: #FDE68A !important;
+            fill: #92400E !important;
         }
 
         .node-g.node-active-tab .node-text tspan {
@@ -776,13 +777,13 @@
         /* --- Static call-graph roles (side-panel anchor) ---------------------- */
 
         .node-g.node-role-caller:not(.search-match):not(.node-active-tab) .node-rect {
-            fill: #2A2112;
+            fill: #FEF3C7;
             stroke: #D97706;
             stroke-width: 1.25px;
         }
 
         .node-g.node-role-caller:not(.search-match):not(.node-active-tab) .node-text {
-            fill: #FCD34D;
+            fill: #92400E;
         }
 
         .node-g.node-role-caller:not(.search-match):not(.node-active-tab) .degree-hat {
@@ -790,13 +791,13 @@
         }
 
         .node-g.node-role-callee:not(.search-match):not(.node-active-tab) .node-rect {
-            fill: #0E2A27;
+            fill: #CCFBF1;
             stroke: #0F766E;
             stroke-width: 1.25px;
         }
 
         .node-g.node-role-callee:not(.search-match):not(.node-active-tab) .node-text {
-            fill: #5EEAD4;
+            fill: #115E59;
         }
 
         .node-g.node-role-callee:not(.search-match):not(.node-active-tab) .degree-hat {
@@ -804,13 +805,13 @@
         }
 
         .node-g.node-role-both:not(.search-match):not(.node-active-tab) .node-rect {
-            fill: #1E1B4B;
+            fill: #E0E7FF;
             stroke: #6366F1;
             stroke-width: 1.25px;
         }
 
         .node-g.node-role-both:not(.search-match):not(.node-active-tab) .node-text {
-            fill: #C7D2FE;
+            fill: #3730A3;
         }
 
         .node-g.node-role-both:not(.search-match):not(.node-active-tab) .degree-hat {
@@ -820,38 +821,38 @@
         /* Dynamic highlight roles */
         svg .node-g.node-connected-highlight.node-role-caller:not(.search-match):not(.node-active-tab) .node-rect,
         svg .node-g.node-connected-highlight.node-highlight-caller:not(.search-match):not(.node-active-tab) .node-rect {
-            fill: #B45309 !important;
-            stroke: #F59E0B !important;
+            fill: #F59E0B !important;
+            stroke: #B45309 !important;
             stroke-width: 1.5px !important;
         }
 
         svg .node-g.node-connected-highlight.node-role-caller:not(.search-match):not(.node-active-tab) .node-text,
         svg .node-g.node-connected-highlight.node-highlight-caller:not(.search-match):not(.node-active-tab) .node-text {
-            fill: #FFFBEB !important;
+            fill: #1C1917 !important;
         }
 
         svg .node-g.node-connected-highlight.node-role-callee:not(.search-match):not(.node-active-tab) .node-rect,
         svg .node-g.node-connected-highlight.node-highlight-callee:not(.search-match):not(.node-active-tab) .node-rect {
-            fill: #0F766E !important;
-            stroke: #2DD4BF !important;
+            fill: #99F6E4 !important;
+            stroke: #0F766E !important;
             stroke-width: 1.5px !important;
         }
 
         svg .node-g.node-connected-highlight.node-role-callee:not(.search-match):not(.node-active-tab) .node-text,
         svg .node-g.node-connected-highlight.node-highlight-callee:not(.search-match):not(.node-active-tab) .node-text {
-            fill: #F0FDFA !important;
+            fill: #115E59 !important;
         }
 
         svg .node-g.node-connected-highlight.node-role-both:not(.search-match):not(.node-active-tab) .node-rect,
         svg .node-g.node-connected-highlight.node-highlight-both:not(.search-match):not(.node-active-tab) .node-rect {
-            fill: #475569 !important;
-            stroke: #94A3B8 !important;
+            fill: #CBD5E1 !important;
+            stroke: #64748B !important;
             stroke-width: 1.5px !important;
         }
 
         svg .node-g.node-connected-highlight.node-role-both:not(.search-match):not(.node-active-tab) .node-text,
         svg .node-g.node-connected-highlight.node-highlight-both:not(.search-match):not(.node-active-tab) .node-text {
-            fill: #FFFFFF !important;
+            fill: #1E293B !important;
         }
 
         /* Highlighted edges */
@@ -871,7 +872,7 @@
 
         .node-g.search-match-active .node-rect {
             fill: var(--accent) !important;
-            stroke: #93C5FD !important;
+            stroke: #1E40AF !important;
             stroke-width: 2.5px !important;
             filter: none !important;
         }
@@ -881,8 +882,8 @@
         }
 
         .node-g.search-match-function .node-rect {
-            fill: var(--amber) !important;
-            stroke: #FCD34D !important;
+            fill: #F59E0B !important;
+            stroke: #B45309 !important;
             stroke-width: 1.75px !important;
             filter: none !important;
         }
@@ -893,7 +894,7 @@
 
         .node-g.search-match-file .node-rect {
             fill: #7C3AED !important;
-            stroke: #C4B5FD !important;
+            stroke: #6D28D9 !important;
             stroke-width: 1.75px !important;
             filter: none !important;
         }
@@ -903,8 +904,8 @@
         }
 
         .node-g.search-match-folder .node-rect {
-            fill: #0891B2 !important;
-            stroke: #67E8F9 !important;
+            fill: #0E7490 !important;
+            stroke: #155E75 !important;
             stroke-width: 1.75px !important;
             filter: none !important;
         }
@@ -1331,7 +1332,7 @@
         .btn-back-to-graph:hover {
             background: var(--bg-hover);
             border-color: var(--accent);
-            color: #FFFFFF;
+            color: var(--text);
         }
 
         .btn-back-to-graph:active {
@@ -1372,7 +1373,7 @@
             color: var(--text);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius);
-            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
             font-family: var(--font-sans);
             font-size: 12px;
             line-height: 1.4;
@@ -1427,7 +1428,7 @@
             align-items: center;
             justify-content: center;
             padding: 16px;
-            background: rgba(0, 0, 0, 0.58);
+            background: rgba(15, 23, 42, 0.32);
         }
 
         #info-overlay.open {
@@ -1440,7 +1441,7 @@
             background: var(--bg-panel);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius);
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
             overflow: hidden;
             font-family: var(--font-sans);
         }
@@ -1493,7 +1494,7 @@
 
         #info-popup-close:hover {
             background: var(--danger-soft);
-            border-color: rgba(248, 113, 113, 0.3);
+            border-color: rgba(220, 38, 38, 0.3);
             color: var(--danger);
         }
 
@@ -1587,7 +1588,7 @@
             background: var(--bg-panel);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.48);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
             font-size: 12px;
         }
 
@@ -1675,7 +1676,7 @@
             border-radius: var(--radius);
             background: var(--bg-surface);
             border: 1px solid var(--border-strong);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.38);
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.10);
             color: var(--accent-hover);
             font-family: var(--font-mono);
             font-size: 10.5px;
@@ -1689,7 +1690,7 @@
         .param-pill:hover {
             background: var(--bg-hover);
             border-color: var(--accent);
-            color: #FFFFFF;
+            color: var(--accent);
         }
 
         .param-pill-bar {
@@ -1722,7 +1723,7 @@
             background: var(--bg-panel);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius);
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
             font-size: 12px;
         }
 
@@ -1787,7 +1788,7 @@
 
         .param-card-icon.active {
             background: var(--amber-soft);
-            border-color: rgba(245, 158, 11, 0.35);
+            border-color: rgba(180, 83, 9, 0.35);
             color: var(--amber);
         }
 
@@ -1845,6 +1846,94 @@
         .param-warn svg {
             width: 12px;
             height: 12px;
+        }
+
+        .param-no-path {
+            flex-shrink: 0;
+            padding: 0 4px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-surface);
+            color: var(--text-faint);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            cursor: help;
+        }
+
+        .param-row-no-path .param-name,
+        .param-row-no-path .param-type {
+            color: var(--text-muted);
+        }
+
+        .param-row.is-expanded {
+            background: var(--bg-surface);
+            border-left-color: var(--text-faint);
+        }
+
+        .param-no-path-details {
+            padding: 4px 10px 7px 24px;
+            border-left: 2px solid var(--text-faint);
+            background: var(--bg-surface);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            line-height: 1.5;
+            color: var(--text-muted);
+        }
+
+        .param-no-path-loc {
+            color: var(--text);
+        }
+
+        .param-no-path-label {
+            margin-top: 3px;
+            color: var(--text-faint);
+        }
+
+        .param-no-path-sources {
+            margin: 2px 0 0;
+            padding-left: 14px;
+            color: var(--text-muted);
+        }
+
+        .param-no-path-note {
+            margin-top: 4px;
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 10px;
+        }
+
+        .param-expand {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            margin-left: auto;
+            flex-shrink: 0;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: 2px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .param-expand svg {
+            width: 12px;
+            height: 12px;
+            transition: transform 0.15s ease;
+        }
+
+        .param-expand:hover {
+            background: var(--bg-surface);
+            border-color: var(--border);
+            color: var(--text);
+        }
+
+        .param-row.is-expanded .param-expand svg {
+            transform: rotate(180deg);
         }
 
         .param-flow {
@@ -1917,7 +2006,7 @@
 
         .intent-out {
             background: var(--amber-soft);
-            color: #FCD34D;
+            color: #B45309;
         }
 
         .intent-inout {
@@ -1944,7 +2033,7 @@
 
         .exec-device {
             background: var(--amber-soft);
-            color: #FCD34D;
+            color: #B45309;
         }
 
         .exec-host {
@@ -2175,7 +2264,7 @@
 
         #trace-close:hover {
             background: var(--danger-soft);
-            border-color: rgba(248, 113, 113, 0.3);
+            border-color: rgba(220, 38, 38, 0.3);
             color: var(--danger);
         }
 
@@ -2188,11 +2277,11 @@
         }
 
         .role-read {
-            color: #22D3EE;
+            color: #0891B2;
         }
 
         .role-pass {
-            color: #94A3B8;
+            color: #64748B;
         }
 
         .trace-legend {
@@ -2237,8 +2326,8 @@
         /* --- Trace classes on the graph -------------------------------------- */
 
         svg.has-data-trace .node-g.trace-dim .node-rect {
-            fill: #19191C !important;
-            stroke: #2A2A30 !important;
+            fill: #EEF1F4 !important;
+            stroke: #D6DBE1 !important;
             opacity: 0.4;
         }
 
@@ -2251,28 +2340,28 @@
         }
 
         svg .trace-node .node-rect {
-            stroke: #38BDF8 !important;
+            stroke: #0284C7 !important;
             stroke-width: 1.75px !important;
         }
 
         svg .trace-node.trace-create .node-rect {
             fill: #15803D !important;
-            stroke: #4ADE80 !important;
+            stroke: #059669 !important;
         }
 
         svg .trace-node.trace-write .node-rect {
             fill: #B45309 !important;
-            stroke: #FCD34D !important;
+            stroke: #F59E0B !important;
         }
 
         svg .trace-node.trace-read .node-rect {
             fill: #0E7490 !important;
-            stroke: #67E8F9 !important;
+            stroke: #0891B2 !important;
         }
 
         svg .trace-node.trace-pass .node-rect {
             fill: #475569 !important;
-            stroke: #94A3B8 !important;
+            stroke: #CBD5E1 !important;
         }
 
         svg .trace-node.trace-create .node-text,
@@ -2301,8 +2390,14 @@
             }
         }
 
+        /* Call-graph context is still available when the Edges toggle is on,
+           but it must not compete with the data path. */
+        svg.has-data-trace .graph-edge:not(.trace-edge) {
+            opacity: 0.12;
+        }
+
         svg .graph-edge.trace-edge {
-            stroke: #38BDF8 !important;
+            stroke: #0284C7 !important;
             stroke-width: 2px !important;
             stroke-dasharray: 6 4;
             opacity: 1 !important;
@@ -2348,7 +2443,7 @@
         }
 
         .trace-badge.trace-badge-pass circle {
-            fill: #52525B;
+            fill: #64748B;
         }
 
         .trace-badge.trace-badge-origin circle {
@@ -2409,6 +2504,22 @@
         .lifecycle-start-title svg {
             width: 11px;
             height: 11px;
+        }
+
+        .lifecycle-start-title.is-first-use {
+            color: var(--accent);
+        }
+
+        .lifecycle-start-title.is-no-path {
+            color: var(--amber);
+        }
+
+        .lifecycle-note {
+            margin-top: 5px;
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            line-height: 1.45;
         }
 
         .lifecycle-start-fn {
@@ -2620,7 +2731,7 @@
         }
 
         .lifecycle-pass {
-            color: #38BDF8;
+            color: #0284C7;
         }
 
         .lifecycle-via {
@@ -2670,7 +2781,7 @@
             display: none;
             align-items: center;
             justify-content: center;
-            background: rgba(18, 18, 20, 0.72);
+            background: rgba(248, 250, 252, 0.78);
             color: var(--text-muted);
             font-family: var(--font-mono);
             font-size: 11px;
@@ -2687,7 +2798,7 @@
             color: var(--text);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius);
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
             font-family: var(--font-mono);
             font-size: 11px;
             opacity: 0;
@@ -3210,6 +3321,8 @@
             </div>
             <div class="info-body">
                 <ul>
+                    <li><strong>Scroll</strong> to pan the graph, or drag the background. Hold <kbd>Ctrl</kbd>/<kbd>⌘</kbd>
+                        while scrolling (or pinch) to zoom.</li>
                     <li><strong>Hover</strong> a node to highlight its direct callers and callees.</li>
                     <li><strong>Click</strong> a node to pin everything connected to it; click it again or click the
                         empty background to clear.</li>
@@ -3219,7 +3332,9 @@
                         jump through matches.</li>
                     <li><strong>Data search:</strong> switch to <em>Data</em> (or type <code>@</code>) and search a
                         field or parameter, e.g. <code>@rho</code> or <code>@t_nh_prog%vn</code>. Choosing a result
-                        shows its full lifecycle, with the origin marked <em>Start here</em>.</li>
+                        shows its lifecycle; while the trace is active the graph shows the data path and dims unrelated
+                        call edges. The earliest event is marked <em>Created here</em> when a create exists, otherwise
+                        <em>First known use</em>.</li>
                     <li><strong>Parameters:</strong> click a function to reveal its <em>&lt;N&gt; params</em> pill, use
                         <kbd>P</kbd>, or right-click and choose <em>Show parameters</em>. Click a parameter to trace it
                         back to its origin; use the expand icon for the full create/write/read/pass flow.</li>
