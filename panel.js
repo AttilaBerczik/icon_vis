@@ -789,41 +789,69 @@ function shortEntityName(entity) {
 function lifecycleEntries(trace) {
     const entities = trace.entities || [];
     const vias = trace.vias || ["assign", "expr", "allocate", "read", "copy", "call", "pass"];
-    const rows = [];
-    const seen = new Set();
-    for (const ev of trace.events || []) {
-        const row = {
-            fn: ev[0],
-            line: ev[1],
-            mask: ev[2],
-            via: vias[ev[3]] || "assign",
-            entity: ev[4] >= 0 ? entities[ev[4]] : "",
-            otherFn: ev[5] >= 0 ? ev[5] : null,
-            otherEntity: ev[6] >= 0 ? entities[ev[6]] : ""
-        };
-        // The extractor can emit identical pass rows for the same call site.
-        // They are indistinguishable in the timeline, so show one of them.
-        const key = [row.fn, row.line, row.mask, row.via, row.entity,
-            row.otherFn, row.otherEntity].join("|");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push(row);
+    // The extractor can emit the same pass row several times for one call site.
+    // Keep every raw event here; renderLifecycleTimeline groups adjacent rows
+    // that look identical and shows the repeat count ("×3") instead of
+    // repeating the same line over and over.
+    return (trace.events || []).map(ev => ({
+        fn: ev[0],
+        line: ev[1],
+        mask: ev[2],
+        via: vias[ev[3]] || "assign",
+        entity: ev[4] >= 0 ? entities[ev[4]] : "",
+        otherFn: ev[5] >= 0 ? ev[5] : null,
+        otherEntity: ev[6] >= 0 ? entities[ev[6]] : ""
+    }));
+}
+
+function lifecycleEntryDisplay(entry, nodes) {
+    const info = lifecycleFnInfo(entry.fn, nodes);
+    const detail = (entry.mask & 8 && entry.otherFn !== null)
+        ? `${shortEntityName(entry.entity)} -> ${shortEntityName(entry.otherEntity)} @ ${lifecycleFnInfo(entry.otherFn, nodes).name}`
+        : (entry.entity ? shortEntityName(entry.entity) : "");
+    return {
+        info,
+        detail,
+        loc: `${info.file || "?"}:${entry.line || "?"}`
+    };
+}
+
+function lifecycleDisplayKey(entry, nodes) {
+    const display = lifecycleEntryDisplay(entry, nodes);
+    return [entry.mask, display.info.name, display.loc, display.detail, entry.via].join("\u001f");
+}
+
+function groupLifecycleEntries(entries, nodes) {
+    const groups = [];
+    for (const entry of entries) {
+        const key = lifecycleDisplayKey(entry, nodes);
+        const last = groups[groups.length - 1];
+        if (last && last.key === key) {
+            last.count += 1;
+        } else {
+            groups.push({ key, count: 1, entry });
+        }
     }
-    return rows;
+    return groups;
 }
 
 function centerNodeOnGraph(nodeId) {
     const container = document.getElementById("visualization");
     if (!container) return;
-    if (typeof container.centerNode === "function") container.centerNode(nodeId, 0.9);
     // While a data trace is active the trace overlay already marks every node
     // and edge on the path. Selecting the node as well would highlight the
     // full call-graph closure and bury the data path under unrelated edges.
+    // Still mark the node the user just clicked so it stands out from the
+    // other trace nodes.
     const traceActive = typeof window.isDataTraceActive === "function" && window.isDataTraceActive();
+    if (traceActive && typeof container.focusTraceNode === "function") {
+        container.focusTraceNode(nodeId);
+    }
+    if (typeof container.centerNode === "function") container.centerNode(nodeId, 0.9);
     if (!traceActive && typeof container.selectNode === "function") container.selectNode(nodeId);
 }
 
-function lifecycleRow(entry, nodes, trace) {
+function lifecycleRow(entry, nodes, trace, count) {
     const row = document.createElement("div");
     row.className = "lifecycle-row";
     row.title = "Click to centre this function on the graph";
@@ -842,35 +870,34 @@ function lifecycleRow(entry, nodes, trace) {
     }
     row.appendChild(glyphs);
 
+    const display = lifecycleEntryDisplay(entry, nodes);
     const main = document.createElement("div");
     main.className = "lifecycle-main";
     const fn = document.createElement("span");
     fn.className = "lifecycle-fn";
-    const info = lifecycleFnInfo(entry.fn, nodes);
-    fn.textContent = info.name;
+    fn.textContent = display.info.name;
     main.appendChild(fn);
 
     const loc = document.createElement("span");
     loc.className = "lifecycle-loc";
-    loc.textContent = `${info.file || "?"}:${entry.line || "?"}`;
+    loc.textContent = display.loc;
     main.appendChild(loc);
 
-    if (entry.mask & 8 && entry.otherFn !== null) {
-        const pass = document.createElement("span");
-        pass.className = "lifecycle-pass";
-        const toInfo = lifecycleFnInfo(entry.otherFn, nodes);
-        pass.textContent = `${shortEntityName(entry.entity)} -> ${shortEntityName(entry.otherEntity)} @ ${toInfo.name}`;
-        main.appendChild(pass);
-    } else if (entry.entity) {
-        const ent = document.createElement("span");
-        ent.className = "lifecycle-entity";
-        ent.textContent = shortEntityName(entry.entity);
-        main.appendChild(ent);
+    if (display.detail) {
+        const detail = document.createElement("span");
+        detail.className = (entry.mask & 8 && entry.otherFn !== null)
+            ? "lifecycle-pass"
+            : "lifecycle-entity";
+        detail.textContent = display.detail;
+        main.appendChild(detail);
     }
 
     const via = document.createElement("span");
     via.className = "lifecycle-via";
-    via.textContent = entry.via;
+    via.textContent = count > 1 ? `${entry.via} ×${count}` : entry.via;
+    if (count > 1) {
+        via.title = `${count} identical events`;
+    }
     main.appendChild(via);
     row.appendChild(main);
     return row;
@@ -886,18 +913,21 @@ function renderLifecycleTimeline(host, trace, nodes) {
         return;
     }
 
+    const groups = groupLifecycleEntries(entries, nodes);
     const heading = document.createElement("div");
     heading.className = "lifecycle-heading";
     heading.textContent = `Timeline · ${entries.length} events (approx. program order)`;
     host.appendChild(heading);
 
-    if (entries.length <= 200) {
+    if (groups.length <= 200) {
         // Keep the events in their recorded order. Grouping by role turned
         // "create, pass, read, pass, read…" into separate create/pass/read
         // sections and hid the actual sequence of uses.
         const list = document.createElement("div");
         list.className = "lifecycle-list";
-        entries.forEach(entry => list.appendChild(lifecycleRow(entry, nodes, trace)));
+        groups.forEach(group => {
+            list.appendChild(lifecycleRow(group.entry, nodes, trace, group.count));
+        });
         host.appendChild(list);
         return;
     }
@@ -910,7 +940,7 @@ function renderLifecycleTimeline(host, trace, nodes) {
     const inner = document.createElement("div");
     inner.className = "lifecycle-virtual-inner";
     const ROW_HEIGHT = 38;
-    sizer.style.height = `${entries.length * ROW_HEIGHT}px`;
+    sizer.style.height = `${groups.length * ROW_HEIGHT}px`;
     sizer.appendChild(inner);
     viewport.appendChild(sizer);
     host.appendChild(viewport);
@@ -924,8 +954,8 @@ function renderLifecycleTimeline(host, trace, nodes) {
         start = nextStart;
         inner.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
         inner.innerHTML = "";
-        entries.slice(start, start + visible).forEach(entry => {
-            inner.appendChild(lifecycleRow(entry, nodes, trace));
+        groups.slice(start, start + visible).forEach(group => {
+            inner.appendChild(lifecycleRow(group.entry, nodes, trace, group.count));
         });
     };
     viewport.addEventListener("scroll", draw);

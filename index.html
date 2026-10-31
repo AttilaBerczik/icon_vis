@@ -2378,6 +2378,23 @@
             animation: traceOriginPulse 1.8s ease-in-out infinite;
         }
 
+        /* Node jumped to from the lifecycle timeline during a data trace.
+           It overrides the role colour so the clicked function is obvious. */
+        svg.has-data-trace .node-g.node-trace-focus .node-rect {
+            fill: #DBEAFE !important;
+            stroke: var(--accent) !important;
+            stroke-width: 2.5px !important;
+            filter: none !important;
+        }
+
+        svg.has-data-trace .node-g.node-trace-focus .node-text {
+            fill: #1E3A8A !important;
+        }
+
+        svg.has-data-trace .node-g.node-trace-focus .node-text tspan {
+            font-weight: 700 !important;
+        }
+
         @keyframes traceOriginPulse {
 
             0%,

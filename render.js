@@ -239,6 +239,7 @@ function createGraphState() {
         roleMap: null,
         // Data-flow trace layer (see setDataTrace below).
         dataTrace: null,
+        traceFocusNodeId: null,
         traceBadgeGroup: null,
         // Optional precomputed layout from vis/layout.json.
         precomputedLayout: null,
@@ -2103,6 +2104,11 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         el.classList.toggle("trace-write", !!(mask & 2));
         el.classList.toggle("trace-read", !!(mask & 4));
         el.classList.toggle("trace-pass", !!(mask & 8));
+        el.classList.toggle("node-trace-focus", !!(
+            trace && state.traceFocusNodeId !== null &&
+            state.traceFocusNodeId !== undefined &&
+            state.traceFocusNodeId === d.id
+        ));
         if (on && trace.steps && trace.steps.has(d.id)) {
             el.dataset.traceStep = String(trace.steps.get(d.id));
         } else if (el.dataset && el.dataset.traceStep) {
@@ -2239,6 +2245,7 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
 
     function setDataTrace(trace, mode) {
         state.dataTrace = trace || null;
+        state.traceFocusNodeId = null;
         state.traceEdgeObjects = null;
         // A trace replaces the visual selection: keeping the old call-graph
         // closure would draw hundreds of unrelated call edges on top of the
@@ -2270,7 +2277,46 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         setDataTrace(null, null);
     }
 
+    // Open the collapsed folder/file boxes that currently hide `nodeId`.
+    // Returns true when the graph was re-rendered (which also replaces the
+    // container's `centerNode` with a fresh one bound to the new positions).
+    function revealNode(nodeId) {
+        if (!nodeId || !state.currentGraphData || !state.currentGraphData.nodes) return false;
+        const rawLabel = state.currentGraphData.nodes.get(nodeId);
+        if (!rawLabel) return false;
+        const info = parseNodeLabel(rawLabel);
+        const fileKey = makeFileKey(info.folder, info.file);
+        let changed = false;
+        if (info.folder && state.collapsedFolders.has(info.folder)) {
+            state.collapsedFolders.delete(info.folder);
+            changed = true;
+        }
+        if (fileKey && state.collapsedFiles.has(fileKey)) {
+            state.collapsedFiles.delete(fileKey);
+            changed = true;
+        }
+        if (!changed) return false;
+
+        const { focusSearchNodeId, animateToNode, ...renderOptions } = options || {};
+        renderGraph(state.currentGraphData.levels, state.currentGraphData.depthById,
+            state.currentGraphData.nodes, state.currentGraphData.edges,
+            container, state, { ...renderOptions, collapseAllOnInit: false });
+        return true;
+    }
+
+    function setTraceFocusNode(nodeId) {
+        state.traceFocusNodeId = (nodeId === null || nodeId === undefined) ? null : nodeId;
+        if (state.dataTrace) applyTraceToDom();
+    }
+
     function centerNode(nodeId, targetScale) {
+        // A node inside a closed folder/file box has no visible position of its
+        // own — centre on the box instead of the node. Open the boxes first and
+        // let the freshly rendered graph do the centring.
+        if (typeof container.node().revealNode === "function" && container.node().revealNode(nodeId)) {
+            container.node().centerNode(nodeId, targetScale);
+            return;
+        }
         const pos = positions.get(nodeId);
         if (!pos || !state.currentZoomBehavior) return;
         const scale = targetScale || Math.max((state.currentZoomTransform || d3.zoomIdentity).k, 0.75);
@@ -2303,6 +2349,8 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     container.node().clearDataTrace = () => clearDataTrace();
     container.node().getDataTrace = () => state.dataTrace;
     container.node().centerNode = (nodeId, scale) => centerNode(nodeId, scale);
+    container.node().revealNode = (nodeId) => revealNode(nodeId);
+    container.node().focusTraceNode = (nodeId) => setTraceFocusNode(nodeId);
 
     if (window.ResizeObserver && containerNode) {
         if (containerNode._navResizeObserver) {
