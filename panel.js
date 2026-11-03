@@ -61,6 +61,11 @@ class DetailPanelManager {
 
             this.detailPanel.style.flex = `0 0 ${newWidth}px`;
             this.detailPanel.style.width = `${newWidth}px`;
+            // A parameter card opened from a side tab is bounded by the graph
+            // pane, so its position has to follow the splitter.
+            if (typeof window.updateOverlayPositions === "function") {
+                window.updateOverlayPositions();
+            }
         };
 
         const onMouseUp = () => {
@@ -190,9 +195,11 @@ class DetailPanelManager {
         this.activeTabId = tabId;
         this.notifyActiveNodeChanged(nodeId);
 
-        if (this.selectedNodeId) {
-            this.selectNode(this.selectedNodeId, this.selectedActiveSet);
-        }
+        // Opening a tab focuses its node in the side graph as well, instead of
+        // carrying over the selection made in the previously active tab.
+        this.selectedNodeId = nodeId;
+        this.selectedActiveSet = null;
+        this.selectNode(this.selectedNodeId, this.selectedActiveSet);
 
         // Scroll tab bar to make new tab visible
         tabBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -311,6 +318,13 @@ class DetailPanelManager {
         const tab = this.tabs.find(t => t.id === tabId);
         if (!tab) return;
 
+        // A parameter card anchored to another side tab would be left floating
+        // over an unrelated graph after the switch.
+        if (window.isParamCardAnchoredTo && window.isParamCardAnchoredTo(this.detailPanel) &&
+            !window.isParamCardAnchoredTo(tab.contentContainer)) {
+            window.closeParamCard();
+        }
+
         this.activeTabId = tabId;
 
         // Update tab buttons
@@ -330,6 +344,11 @@ class DetailPanelManager {
         // refresh its rendered elements now that it is visible again.
         this.updateViewportCulling();
 
+        // Switching tabs moves the focus to that tab's node in both views.
+        if (tab.nodeId !== null && tab.nodeId !== undefined) {
+            this.selectedNodeId = tab.nodeId;
+            this.selectedActiveSet = null;
+        }
         if (this.selectedNodeId) {
             this.selectNode(this.selectedNodeId, this.selectedActiveSet);
         }
@@ -340,6 +359,12 @@ class DetailPanelManager {
         if (index === -1) return;
 
         const tab = this.tabs[index];
+
+        // Close a parameter card that belongs to this tab before its graph is
+        // removed from the DOM.
+        if (window.isParamCardAnchoredTo && window.isParamCardAnchoredTo(tab.contentContainer)) {
+            window.closeParamCard();
+        }
 
         // Clean up DOM
         if (tab.tabBtn && tab.tabBtn.parentNode) {
@@ -362,6 +387,9 @@ class DetailPanelManager {
     }
 
     closePanel() {
+        if (window.isParamCardAnchoredTo && window.isParamCardAnchoredTo(this.detailPanel)) {
+            window.closeParamCard();
+        }
         // Remove all tabs and content
         this.tabs.forEach(tab => {
             if (tab.tabBtn && tab.tabBtn.parentNode) {
@@ -642,15 +670,38 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
                 window.detailPanelManager.selectedActiveSet = activeSet;
             }
             const leftViz = document.getElementById("visualization");
-            if (leftViz && typeof leftViz.selectNode === "function") {
+            if (!leftViz) return;
+            // A data trace owns the main view's colours. Selecting the node
+            // would be ignored there, so move the trace focus instead and
+            // bring the node into view.
+            const traceActive = typeof window.isDataTraceActive === "function" && window.isDataTraceActive();
+            if (traceActive && typeof leftViz.focusTraceNode === "function") {
+                leftViz.focusTraceNode(cId || null);
+                if (cId && typeof leftViz.centerNode === "function") {
+                    leftViz.centerNode(cId, 0.9);
+                }
+                return;
+            }
+            if (typeof leftViz.selectNode === "function") {
                 leftViz.selectNode(cId, activeSet);
             }
+            if (cId && typeof leftViz.centerNode === "function") {
+                leftViz.centerNode(cId, 0.9);
+            }
+        }
+    };
+
+    // A parameter card opened from this tab follows the tab's pan/zoom.
+    const syncOverlayPositions = () => {
+        if (typeof window.updateOverlayPositions === "function") {
+            window.updateOverlayPositions();
         }
     };
 
     // --- 1. Build Combined Graph (Default on start) ---
     const combinedSel = d3.select(combinedViz);
     const combinedState = createGraphState();
+    combinedState.onTransform = syncOverlayPositions;
     const combined = buildCombinedGraph(nodeId, origNodes, origEdges);
 
     if (combined.hasCallers || combined.hasCallees) {
@@ -669,6 +720,7 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
 
         const calleeSel = d3.select(calleeViz);
         calleeState = createGraphState();
+        calleeState.onTransform = syncOverlayPositions;
         const cEdges = cloneEdges(origEdges);
         const cNodes = cloneNodes(origNodes);
 
@@ -691,6 +743,7 @@ function renderSubGraphInContainer(nodeId, nodes, edges, containerEl) {
 
         const callerSel = d3.select(callerViz);
         callerState = createGraphState();
+        callerState.onTransform = syncOverlayPositions;
         const reverseEdges = buildReverseEdgeMap(origEdges);
         const callerNodes = cloneNodes(origNodes);
 

@@ -20,6 +20,10 @@ let paramPillNodeId = null;
 let paramCardNodeId = null;
 let paramCardPinned = false;
 let paramCardData = null;
+// The graph pane that owns the node shown in the parameter card. When the card
+// is opened from a side-panel tab this points at that tab's graph, so the card
+// follows the graph the user actually right-clicked instead of the main view.
+let paramCardSourceContainer = null;
 let currentTrace = null;
 let currentTraceView = null;
 let currentTraceMode = "full";
@@ -33,6 +37,22 @@ let searchMode = "functions";
 // Used by panel.js to avoid adding a call-graph selection highlight on top of
 // an active data trace.
 window.isDataTraceActive = () => !!currentTrace;
+
+// The parameter card and the data lifecycle are read-only "inspection" views:
+// the focused node already stands out by colour, so dimming every other node
+// would only make the graph harder to read. render.js consults this to decide
+// whether the call-graph highlight should fade unrelated nodes.
+window.isParameterViewActive = () => {
+    if (currentTrace) return true;
+    if (paramCardNodeId !== null) return true;
+    const manager = window.detailPanelManager;
+    if (manager && Array.isArray(manager.tabs)) {
+        const active = manager.tabs.find(t => t.id === manager.activeTabId);
+        if (active && active.type === "lifecycle") return true;
+    }
+    return false;
+};
+
 let dataSearchResults = [];
 let dataSearchSelection = -1;
 
@@ -538,16 +558,21 @@ function closeContextMenu() {
 }
 
 document.getElementById("ctx-open-tab").addEventListener("click", () => {
-    if (contextMenuNodeId && window.detailPanelManager) window.detailPanelManager.openTab(contextMenuNodeId);
+    if (contextMenuNodeId !== null && contextMenuNodeId !== undefined && window.detailPanelManager) {
+        window.detailPanelManager.openTab(contextMenuNodeId);
+    }
     closeContextMenu();
 });
 
 const ctxShowParams = document.getElementById("ctx-show-params");
 if (ctxShowParams) {
     ctxShowParams.addEventListener("click", () => {
-        if (contextMenuNodeId) {
+        if (contextMenuNodeId !== null && contextMenuNodeId !== undefined) {
             lastSelectedNodeId = contextMenuNodeId;
-            openParamCard(contextMenuNodeId, true);
+            // Keep the card attached to the graph the menu was opened from
+            // (main view or a side-panel tab).
+            openParamCard(contextMenuNodeId, true,
+                contextMenuTarget && contextMenuTarget.sourceContainer);
         }
         closeContextMenu();
     });
@@ -659,7 +684,9 @@ function setupSearchUI(visContainerNode) {
     function setMode(mode) {
         searchMode = mode === "data" ? "data" : "functions";
         document.querySelectorAll("#search-mode button").forEach((b) => {
-            b.classList.toggle("active", b.dataset.mode === searchMode);
+            const active = b.dataset.mode === searchMode;
+            b.classList.toggle("active", active);
+            b.setAttribute("aria-pressed", String(active));
         });
         searchInput.placeholder = searchMode === "data"
             ? "Search data field or parameter (e.g. @rho)"
@@ -813,7 +840,10 @@ function setupSearchUI(visContainerNode) {
 
     // Mode toggle
     document.querySelectorAll("#search-mode button").forEach((btn) => {
-        btn.addEventListener("click", () => setMode(btn.dataset.mode));
+        btn.addEventListener("click", () => {
+            setMode(btn.dataset.mode);
+            searchInput.focus();
+        });
     });
 
     searchInput.addEventListener("input", (e) => {
@@ -946,7 +976,12 @@ function hideParamPill() {
     if (pill) pill.style.display = "none";
 }
 
-function openParamCard(nodeId, pin) {
+function refreshMainHighlight() {
+    const vis = document.getElementById("visualization");
+    if (vis && typeof vis.refreshHighlight === "function") vis.refreshHighlight();
+}
+
+function openParamCard(nodeId, pin, sourceContainer) {
     const rec = recordForNode(nodeId);
     if (!rec || rec.external) return;
     if (paramCardPinned && paramCardNodeId !== null && paramCardNodeId !== nodeId && !pin) {
@@ -955,11 +990,15 @@ function openParamCard(nodeId, pin) {
     }
     paramCardNodeId = nodeId;
     paramCardPinned = !!pin || paramCardPinned;
+    paramCardSourceContainer = sourceContainer || null;
     const card = document.getElementById("param-card");
     if (!card) return;
     card.style.display = "flex";
     card.innerHTML = `<div class="param-card-loading">Loading parameters…</div>`;
     updateOverlayPositions();
+    // While the card is open, keep the whole graph at full opacity; the
+    // selected node is still identifiable by its focus colour.
+    refreshMainHighlight();
 
     if (!dataflowClient) {
         renderParamCard(rec, null);
@@ -982,10 +1021,19 @@ function closeParamCard() {
     paramCardNodeId = null;
     paramCardPinned = false;
     paramCardData = null;
+    paramCardSourceContainer = null;
     const card = document.getElementById("param-card");
     if (card) card.style.display = "none";
+    refreshMainHighlight();
 }
 window.closeParamCard = closeParamCard;
+
+// Used by the side panel to close a card that belongs to a tab being closed.
+window.isParamCardAnchoredTo = (container) => {
+    if (!paramCardSourceContainer || !container) return false;
+    return container === paramCardSourceContainer ||
+        (typeof container.contains === "function" && container.contains(paramCardSourceContainer));
+};
 
 function graphCallersOf(nodeId) {
     if (!parsedGraph || !parsedGraph.edges || nodeId === undefined || nodeId === null) return [];
@@ -1267,10 +1315,23 @@ function updateOverlayPositions() {
         return { x, y, w: (dims ? dims.w : 80) * transform.k, h: (dims ? dims.h : 30) * transform.k };
     };
 
+    // A card opened from a side-panel tab follows that tab's graph. Fall back
+    // to the main view when the tab was closed or the node has no position.
+    const anchorFor = (nodeId, containerEl) => {
+        if (containerEl && containerEl.isConnected && containerEl.getClientRects().length &&
+            typeof containerEl.getNodeScreenAnchor === "function") {
+            const anchor = containerEl.getNodeScreenAnchor(nodeId);
+            if (anchor) return anchor;
+        }
+        return positionFor(nodeId);
+    };
+
     // Overlays belong to the graph pane; never let them cover the docked
     // inspector when it is open.
     const leftPanelEl = document.getElementById("left-panel");
-    const paneRight = leftPanelEl ? leftPanelEl.getBoundingClientRect().right : window.innerWidth;
+    const paneRect = leftPanelEl ? leftPanelEl.getBoundingClientRect() : rect;
+    const paneLeft = paneRect.left + 8;
+    const paneRight = paneRect.right - 8;
 
     const pill = document.getElementById("param-pill");
     if (pill && paramPillNodeId !== null) {
@@ -1278,10 +1339,10 @@ function updateOverlayPositions() {
         if (p) {
             const pillWidth = pill.offsetWidth || 90;
             let pillLeft = p.x + p.w / 2 + 8;
-            if (pillLeft + pillWidth > paneRight - 8) {
+            if (pillLeft + pillWidth > paneRight) {
                 pillLeft = p.x - p.w / 2 - pillWidth - 8;
             }
-            pillLeft = Math.max(8, Math.min(pillLeft, paneRight - pillWidth - 8));
+            pillLeft = Math.max(paneLeft, Math.min(pillLeft, paneRight - pillWidth));
             pill.style.left = `${pillLeft}px`;
             pill.style.top = `${p.y - p.h / 2}px`;
         } else {
@@ -1291,23 +1352,31 @@ function updateOverlayPositions() {
 
     const card = document.getElementById("param-card");
     if (card && paramCardNodeId !== null && card.style.display !== "none") {
-        const p = positionFor(paramCardNodeId);
-        if (!p) {
-            card.style.display = "none";
-            return;
+        // Keep the card inside the graph pane so it can never sit on top of the
+        // side panel. If the pane is narrow, shrink the card instead of
+        // dropping it (which used to make "Show parameters" look broken).
+        const available = Math.max(200, paneRight - paneLeft);
+        card.style.maxWidth = `${available}px`;
+        const width = Math.min(card.offsetWidth || 360, available);
+        const height = card.offsetHeight || 300;
+
+        const p = anchorFor(paramCardNodeId, paramCardSourceContainer);
+        let left;
+        let top;
+        if (p) {
+            left = p.x + p.w / 2 + 14;
+            if (left + width > paneRight) left = p.x - p.w / 2 - width - 14;
+            top = p.y - p.h / 2;
+        } else {
+            // The source node is off-screen or inside a closed box. Still show
+            // the card, docked to the top-right corner of the graph pane.
+            left = paneRight - width;
+            top = rect.top + 16;
         }
-        const width = card.offsetWidth || 340;
-        const rightLimit = paneRight - 12;
-        let left = p.x + p.w / 2 + 14;
-        if (left + width > rightLimit) left = p.x - p.w / 2 - width - 14;
-        if (left + width > rightLimit) {
-            // Not enough room beside the node inside the graph pane.
-            closeParamCard();
-            return;
-        }
-        left = Math.max(12, left);
-        let top = p.y - p.h / 2;
-        top = Math.max(12, Math.min(top, window.innerHeight - (card.offsetHeight || 300) - 12));
+        left = Math.max(paneLeft, Math.min(left, paneRight - width));
+        const graphTop = rect.top + 12;
+        const graphBottom = rect.bottom - 12;
+        top = Math.max(graphTop, Math.min(top, Math.max(graphTop, graphBottom - height)));
         card.style.left = `${left}px`;
         card.style.top = `${top}px`;
     }

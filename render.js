@@ -81,6 +81,8 @@ function showGraphContextMenu(event, target) {
     } else {
         setContextMenuItem("ctx-open-tab", false);
     }
+    // Parameters belong to functions, not to folder/file boxes.
+    setContextMenuItem("ctx-show-params", target.kind === "node");
 
     if (target.fileKey && !fileProtected) {
         const hidden = isContextTargetFileHidden(target);
@@ -2328,6 +2330,10 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
         svg.transition().duration(450).ease(d3.easeCubicOut)
             .call(zoom.transform, transform)
             .on("end", () => updateViewportCulling(true));
+        // Materialise the target immediately as well. If the camera transition
+        // is interrupted (e.g. by another tab switch), its "end" handler never
+        // runs and the focused node would stay outside the culled viewport.
+        updateViewportCulling(true);
     }
 
     let cullingRafId = null;
@@ -2351,6 +2357,24 @@ function renderGraph(levels, depthById, nodes, edges, containerSel, state, optio
     container.node().centerNode = (nodeId, scale) => centerNode(nodeId, scale);
     container.node().revealNode = (nodeId) => revealNode(nodeId);
     container.node().focusTraceNode = (nodeId) => setTraceFocusNode(nodeId);
+    // Screen-space anchor for HTML overlays (parameter card/pill). Keeping this
+    // on the graph container lets the card follow the graph it was opened from,
+    // including side-panel tabs.
+    container.node().getNodeScreenAnchor = (nodeId) => {
+        if (!containerNode) return null;
+        const pos = positions.get(nodeId);
+        if (!pos) return null;
+        const dims = nodeDims.get(nodeId);
+        const box = containerNode.getBoundingClientRect();
+        const t = state.currentZoomTransform || d3.zoomIdentity;
+        const k = t.k || 1;
+        return {
+            x: box.left + pos.x * k + t.x,
+            y: box.top + pos.y * k + t.y,
+            w: (dims ? dims.w : 80) * k,
+            h: (dims ? dims.h : 30) * k
+        };
+    };
 
     if (window.ResizeObserver && containerNode) {
         if (containerNode._navResizeObserver) {
@@ -2633,7 +2657,11 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         return roles;
     }
 
-    const isDimEnabled = () => window.dimHighlightEnabled !== false;
+    // Parameter/data views identify their focus with a colour instead of
+    // fading everything else. Keep the rest of the graph at full opacity while
+    // the parameter card or a lifecycle tab is open.
+    const isDimEnabled = () => window.dimHighlightEnabled !== false
+        && !(typeof window.isParameterViewActive === "function" && window.isParameterViewActive());
 
     // True when the pointer moved from one interactive graph element to another
     // (node <-> node or node <-> edge). In that case the upcoming mouseover will
@@ -2894,7 +2922,15 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         activeClickedNodeId = pendingClickedId;
         if (state) state.activeClickedNodeId = pendingClickedId;
         updateHighlightState(pendingClickedSet, pendingClickedId);
-    } else if (activeClickedNodeId && nodeElementsById.has(activeClickedNodeId)) {
+    } else if (activeClickedNodeId && (
+        nodeElementsById.has(activeClickedNodeId) ||
+        // The DOM for the selection may not exist yet: attachInteractions runs
+        // before the viewport-culling pass that materialises nodes. Keep the
+        // selection as long as the node is part of the graph; the culling pass
+        // then applies the highlight classes when it creates the element.
+        (state && state.currentGraphData && state.currentGraphData.nodes &&
+            state.currentGraphData.nodes.has(activeClickedNodeId))
+    )) {
         updateHighlightState(fullClosure(activeClickedNodeId), activeClickedNodeId);
     } else {
         activeClickedNodeId = null;
@@ -3026,7 +3062,8 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                 folder: d.folder,
                 fileKey: d.fileKey,
                 fileName: d.file,
-                functionName: d.lines[d.lines.length - 1]
+                functionName: d.lines[d.lines.length - 1],
+                sourceContainer: container.node()
             });
         });
 
@@ -3209,6 +3246,7 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
         };
 
         cNode.setActiveTabNode = function(nodeId) {
+            const previousNodeId = state ? state.activeTabNodeId : null;
             if (state) state.activeTabNodeId = nodeId;
 
             // Uncollapse folder/file on left if nodeId is collapsed
@@ -3234,6 +3272,12 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                     ...options,
                     collapseAllOnInit: false
                 });
+                if (state && state.dataTrace && nodeId && typeof container.node().focusTraceNode === "function") {
+                    container.node().focusTraceNode(nodeId);
+                }
+                if (nodeId && typeof container.node().centerNode === "function") {
+                    container.node().centerNode(nodeId, 0.9);
+                }
                 return;
             }
 
@@ -3276,10 +3320,30 @@ function attachInteractions(nodesGroup, edgesGroup, edgesMap, svgEl, state, styl
                 }
             }
 
+            // A different side-panel tab now owns the focus. Drop the previous
+            // click selection so it does not keep its primary colour (and the
+            // dimming it causes) while the new tab's node is shown.
+            if (nodeId && activeClickedNodeId && activeClickedNodeId !== nodeId) {
+                activeClickedNodeId = null;
+                if (state) state.activeClickedNodeId = null;
+            }
+
+            // During a data trace the trace overlay owns the colours, so mark
+            // the newly active node as the focused trace node instead.
+            if (state && state.dataTrace && nodeId && typeof container.node().focusTraceNode === "function") {
+                container.node().focusTraceNode(nodeId);
+            }
+
             if (activeClickedNodeId) {
                 updateHighlightState(fullClosure(activeClickedNodeId), activeClickedNodeId);
             } else {
                 updateHighlightState(null, null);
+            }
+
+            // Bring the newly active tab's node into view, the same way a
+            // lifecycle-timeline row does.
+            if (nodeId && nodeId !== previousNodeId && typeof container.node().centerNode === "function") {
+                container.node().centerNode(nodeId, 0.9);
             }
         };
 
