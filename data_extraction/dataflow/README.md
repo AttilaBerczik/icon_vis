@@ -57,15 +57,30 @@ warm, plus global analysis.
 | `out/coverage.json` | parser tiers, unresolved calls/stubs by library, profile merge stats, intent mismatches, timings, exec-space counts |
 | `out/callgraph.dot` | resolved function call graph, edge weight = number of call sites |
 | `out/dataflow.dot` | bipartite function ↔ data-entity graph for source-level direct accesses (`read`/`write`/`readwrite`); inter-procedural effects are in `passes.json`/`index.json` |
-| `out/dataflow.sqlite` | indexed tables: `functions`, `params`, `entities`, `accesses`, `calls`, `passes`, `links`, `residency_events`, `findings` |
+| `out/dataflow.sqlite` | indexed tables: `functions`, `params`, `entities`, `types`, `variables`, `accesses`, `calls`, `passes`, `links`, `residency_events`, `findings` |
 | `out/manifest.json` | exact file list, profiles, include roots, timings |
 | `vis/graph.json` + `vis/layout.json` | static viewer graph and its cached ordering (`--vis`) |
 | `vis/fn/<component>.json` | per-function parameters, intents, ranks and lifecycle group ids |
-| `vis/search.json` | sorted field/parameter/module-variable search index |
-| `vis/trace/<xx>.json` | 256 precomputed lifecycle shards (create/write/read/pass) |
+| `vis/search.json` | sorted field/parameter/variable/type search index (rows carry declaring/declared type) |
+| `vis/trace/<xx>.json` | 256 precomputed lifecycle shards (create/write/read/pass, per-route summaries) |
+| `vis/structs.json` | type pages: declaration location, `extends`, value flag, members, containment parents, holders, route counts, unresolved routes |
+| `vis/struct/<xx>.json` | lazy per-type touch sets rolled up through containment (cycle-safe) |
+| `vis/struct/fn/<xx>.json` | reverse function → used-data index for the explorer's **Data used here** |
 
-Lifecycle groups merge equivalent field paths onto the type that owns the leaf
-(`t_nh_state%prog%rho` ≡ `t_nh_prog%rho`). Call-site passes are treated as
+Lifecycle groups merge equivalent field paths onto the type that declares the
+leaf (`t_nh_state%prog%rho` ≡ `t_nh_prog%rho`), keep every raw route on the event
+rows, and fold tiny value-type tails (`%x`) into their parent member. Duplicate
+type names across modules are unioned for component lookup (field entities only
+carry the bare name), and a component missing on an abstract `CLASS(T)` owner is
+resolved through a subtype when exactly one subtype declares it. Declaration and
+component lines are scanned from the original source when fparser does not expose
+a span; this fixes both the `TYPE` line and multi-line component declarations.
+Struct-typed dummy arguments are only unioned with actuals of the same declared
+type; a field actual feeds the member group instead. Paths that still cannot be
+resolved are kept verbatim and listed in `structs.json`; the usual causes are
+type-bound procedure names used as field paths (`obj%method`), pointer-wrapper
+types whose declarations are absent from the extracted type table, and
+cross-language bridge fields. Call-site passes are otherwise treated as
 **unambiguous**: a callee formal joins its actuals only when all of them resolve
 to the same data entity. This keeps `hydro_adjust::rho` attached to
 `t_nh_prog%rho` without merging the thousands of unrelated error-message locals

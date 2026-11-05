@@ -45,6 +45,9 @@ class PathResolver:
         self._alias_leaf_type_cache: dict[str, str | None] = {}
 
     def _find_this_type(self) -> str | None:
+        explicit = self.proc.get("class")
+        if explicit:
+            return explicit.lower()
         q = self.proc.get("qualified") or ""
         if "::" in q:
             parts = q.split("::")

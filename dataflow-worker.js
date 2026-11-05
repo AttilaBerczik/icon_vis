@@ -13,6 +13,11 @@ const fnShardPromises = new Map();
 const traceShards = new Map();
 const tracePromises = new Map();
 const TRACE_CACHE_LIMIT = 16;
+const STRUCT_KINDS = ["field", "param", "var", "struct", "local"];
+let structsIndex = null;
+let structsPromise = null;
+const structShards = new Map();
+const structShardPromises = new Map();
 
 function cachePut(cache, key, value, limit) {
     if (cache.has(key)) cache.delete(key);
@@ -22,8 +27,11 @@ function cachePut(cache, key, value, limit) {
     }
 }
 
-async function fetchJson(relPath) {
-    const res = await fetch(BASE + relPath, { cache: "force-cache" });
+async function fetchJson(relPath, cacheMode) {
+    // Struct data is rebuilt far more often than the call graph while the
+    // explorer is being developed; revalidate it instead of serving a stale
+    // HTTP-cache entry. The other large files keep force-cache.
+    const res = await fetch(BASE + relPath, { cache: cacheMode || "force-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${relPath}`);
     return res.json();
 }
@@ -68,17 +76,26 @@ async function search(query, limit) {
         out.push({
             name,
             groupId: gid,
-            kind: ["field", "param", "var"][data.kinds[i]] || "other",
+            kind: STRUCT_KINDS[data.kinds[i]] || "other",
             reads: data.reads[i],
-            writes: data.writes[i]
+            writes: data.writes[i],
+            type: (data.types && data.types[i]) || "",
+            member: (data.members && data.members[i]) || "",
+            fns: (data.fns && data.fns[i]) || 0
         });
         if (out.length >= max * 2) break;
     }
+    // Types are the entry point to the explorer and are shown in the first
+    // group; ranking them behind hundreds of same-named parameters would make
+    // a type unreachable after the result cap.
+    const kindOrder = { struct: 0, field: 1, var: 2, param: 3, local: 4 };
     out.sort((a, b) => {
         const aExact = a.name === q ? 0 : (a.name.endsWith("%" + q) ? 1 : 2);
         const bExact = b.name === q ? 0 : (b.name.endsWith("%" + q) ? 1 : 2);
         if (aExact !== bExact) return aExact - bExact;
-        if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+        const aKind = kindOrder[a.kind] ?? 9;
+        const bKind = kindOrder[b.kind] ?? 9;
+        if (aKind !== bKind) return aKind - bKind;
         const aSize = (a.reads || 0) + (a.writes || 0);
         const bSize = (b.reads || 0) + (b.writes || 0);
         if (aSize !== bSize) return bSize - aSize;
@@ -131,6 +148,47 @@ async function getTrace(gid) {
     return record;
 }
 
+async function getStructs() {
+    if (structsIndex) return structsIndex;
+    if (!structsPromise) {
+        structsPromise = fetchJson("structs.json", "no-cache").then((data) => {
+            structsIndex = data;
+            return data;
+        });
+    }
+    return structsPromise;
+}
+
+async function getStructShard(shard) {
+    if (!shard) return null;
+    if (structShards.has(shard)) return structShards.get(shard);
+    let promise = structShardPromises.get(shard);
+    if (!promise) {
+        promise = fetchJson(shard, "no-cache").then((payload) => {
+            structShards.set(shard, payload);
+            structShardPromises.delete(shard);
+            return payload;
+        });
+        structShardPromises.set(shard, promise);
+    }
+    return promise;
+}
+
+async function getStructTouch(typeKey) {
+    const structs = await getStructs();
+    const rec = structs && structs.types ? structs.types[typeKey] : null;
+    if (!rec || !rec.shard) return null;
+    const payload = await getStructShard(rec.shard);
+    return payload && payload.types ? (payload.types[typeKey] || null) : null;
+}
+
+async function getFunctionUsage(nodeId) {
+    if (nodeId === null || nodeId === undefined) return null;
+    const shard = `struct/fn/${(Math.abs(Number(nodeId)) % 32).toString(16).padStart(2, "0")}.json`;
+    const payload = await getStructShard(shard);
+    return payload && payload.functions ? (payload.functions[String(nodeId)] || []) : [];
+}
+
 async function prefetchParams(shards) {
     if (!Array.isArray(shards)) return;
     for (const shard of shards) {
@@ -156,6 +214,10 @@ self.addEventListener("message", (event) => {
     if (type === "search") task = search(payload.query, payload.limit);
     else if (type === "getParams") task = getParams(payload.fnId, payload.shard);
     else if (type === "getTrace") task = getTrace(payload.groupId);
+    else if (type === "getStructs") task = getStructs();
+    else if (type === "getStructShard") task = getStructShard(payload.shard);
+    else if (type === "getStructTouch") task = getStructTouch(payload.typeKey);
+    else if (type === "getFunctionUsage") task = getFunctionUsage(payload.nodeId);
     else if (type === "prefetchParams") task = prefetchParams(payload.shards);
     else task = Promise.reject(new Error(`unknown request ${type}`));
     task.then((result) => {

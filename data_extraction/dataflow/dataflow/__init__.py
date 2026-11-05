@@ -6,4 +6,4 @@ processes and be cached, while all global analysis runs on small fact
 dictionaries.
 """
 
-__version__ = "0.4.1"
+__version__ = "0.4.3"

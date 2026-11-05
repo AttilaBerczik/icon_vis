@@ -150,6 +150,8 @@ class TypesView:
                 "name": row["name"],
                 "module": row.get("module"),
                 "extends": row.get("extends"),
+                "file": row.get("file"),
+                "line": row.get("line"),
                 "fields": fields,
             })
 
@@ -175,39 +177,393 @@ class TypesView:
         return chain
 
 
-def _find_field(types, owner: str, component: str) -> dict | None:
-    for t in types.type_chain(owner):
-        for f in t.get("fields", []) or []:
-            if (f.get("name") or "").lower() == component:
-                return f
-    return None
+INTRINSIC_TYPES = {
+    "integer", "real", "logical", "character", "complex", "double",
+    "doubleprecision", "byte", "int", "long", "short", "float", "bool",
+    "void", "c_ptr", "c_funptr", "c_int", "c_double", "c_float", "c_char",
+    "c_bool", "c_size_t", "c_int64_t", "c_int32_t", "c_loc",
+}
+MAX_VALUE_FIELDS = 4
+MAX_TYPE_WALK = 64
+
+
+def _base_type_name(value) -> str | None:
+    """Return the bare type name of a declaration type spelling.
+
+    ``real(kind=wp)`` -> ``real``; ``type(t_patch)`` -> ``t_patch``;
+    ``class(foo)`` -> ``foo``. Module qualification (``module::type``) is
+    dropped because field entities carry the bare name.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    low = text.lower()
+    if low.startswith(("type(", "class(")):
+        text = text[text.find("(") + 1:]
+        if text.endswith(")"):
+            text = text[:-1]
+    text = text.split("(")[0].strip()
+    return text.split("::")[-1].lower() or None
+
+
+def _is_intrinsic_type(value) -> bool:
+    base = _base_type_name(value)
+    return bool(base) and base in INTRINSIC_TYPES
+
+
+_DECL_LINE_CACHE: dict[tuple[str, str], int | None] = {}
+_COMPONENT_LINE_CACHE: dict[tuple[str, str, str], int | None] = {}
+_FILE_LINES_CACHE: dict[str, list[str]] = {}
+
+
+def _fortran_path(path: str | None) -> bool:
+    ext = os.path.splitext((path or "").lower())[1]
+    return ext in {".f90", ".f", ".f03", ".f08", ".f77", ".fpp", ".for", ".ftn"}
+
+
+def _file_lines(path: str | None) -> list[str]:
+    if not path:
+        return []
+    if path in _FILE_LINES_CACHE:
+        return _FILE_LINES_CACHE[path]
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        lines = []
+    _FILE_LINES_CACHE[path] = lines
+    return lines
+
+
+def _find_type_declaration_line(path: str | None, name: str) -> int | None:
+    """Best-effort ``TYPE ... :: name`` line from the original source.
+
+    The parser does not expose a span for every ``Derived_Type_Def`` (and the
+    cached facts may predate that fix), so this scans the source once per
+    ``(path, type)`` pair. C++ sources are left to the parser's own line.
+    """
+    if not path or not name or not _fortran_path(path):
+        return None
+    key = (path, name)
+    if key in _DECL_LINE_CACHE:
+        return _DECL_LINE_CACHE[key]
+    result = None
+    for number, line in enumerate(_file_lines(path), 1):
+        text = line.split("!", 1)[0]
+        if not re.match(r"\s*type\b", text, re.I):
+            continue
+        if re.match(r"\s*type\s*\(", text, re.I):
+            continue
+        if re.search(r"\b" + re.escape(name) + r"\b", text, re.I):
+            result = number
+            break
+    _DECL_LINE_CACHE[key] = result
+    return result
+
+
+def _find_component_line(path: str | None, type_name: str,
+                         field_name: str, fallback=None) -> int | None:
+    """Line of one component inside its type block.
+
+    A single declaration can span dozens of continuation lines
+    (``REAL :: & ... & t2m_bias``), and fparser reports the start of the whole
+    statement for every component. Scanning the type block finds the actual
+    component line without changing the parser/cache.
+    """
+    if not path or not type_name or not field_name or not _fortran_path(path):
+        return fallback
+    key = (path, type_name, field_name)
+    if key in _COMPONENT_LINE_CACHE:
+        cached = _COMPONENT_LINE_CACHE[key]
+        return cached if cached is not None else fallback
+    lines = _file_lines(path)
+    start = _find_type_declaration_line(path, type_name)
+    result = None
+    if start:
+        end = len(lines)
+        for number in range(start, len(lines)):
+            if re.match(r"\s*end\s*type\b", lines[number], re.I):
+                end = number + 1
+                break
+        pattern = re.compile(r"\b" + re.escape(field_name) + r"\b", re.I)
+        for number in range(start, end):
+            text = lines[number].split("!", 1)[0]
+            if pattern.search(text):
+                result = number + 1
+                break
+    _COMPONENT_LINE_CACHE[key] = result
+    return result if result is not None else fallback
+
+
+@dataclass
+class FieldResolution:
+    """Result of walking a typed field path through the type table."""
+
+    member: str | None          # ``declaring_type%member`` (merge identity)
+    route: str                  # full typed path as spelled by the entity
+    owner_chain: list[str]      # declaring type per walked step
+    subcomponent: str | None    # value-type tail (``x`` or ``x%y``)
+    unresolved: bool = False
+
+    @property
+    def declaring_type(self) -> str | None:
+        return self.member.split("%", 1)[0] if self.member else None
+
+
+class TypeRegistry:
+    """Type lookup with declaration metadata, inheritance and value types.
+
+    Field entities only carry the bare type name (``field:t_patch%cells%x``),
+    so the registry keys types by that name. ``module`` and ``file`` are kept
+    as metadata on the type page. Duplicate names across modules resolve to the
+    first declaration, matching the extractor's field spelling.
+    """
+
+    def __init__(self, types):
+        self.records: dict[str, dict] = {}
+        self.by_name: dict[str, list[dict]] = defaultdict(list)
+        raw = getattr(types, "types", types) or {}
+        if isinstance(raw, dict):
+            entries = []
+            for name, lst in raw.items():
+                for t in lst or []:
+                    entries.append((name, t))
+        else:
+            entries = [((t or {}).get("name"), t) for t in raw]
+        for fallback_name, t in entries:
+            if not t:
+                continue
+            name = (t.get("name") or fallback_name or "").lower()
+            if not name:
+                continue
+            file = t.get("file") or t.get("rel_path") or ""
+            line = _find_type_declaration_line(file, name)
+            if not line:
+                line = t.get("line")
+            if not line:
+                field_lines = [fx.get("line") for fx in t.get("fields") or []
+                               if fx.get("line")]
+                if field_lines:
+                    line = min(field_lines)
+            rec = {
+                "name": name,
+                "module": (t.get("module") or None),
+                "extends": _base_type_name(t.get("extends")),
+                "file": file,
+                "line": line,
+                "fields": list(t.get("fields") or []),
+                "raw": t,
+            }
+            self.by_name[name].append(rec)
+            self.records.setdefault(name, rec)
+        # A handful of type names exist in more than one module. Field
+        # entities only carry the bare name, so resolution sees the union of
+        # their components. This resolves e.g. `t_var%info` even though the
+        # first `t_var` declaration (mo_meteogram_output) has no such field.
+        for name, variants in list(self.by_name.items()):
+            if len(variants) < 2:
+                continue
+            canonical = max(
+                variants,
+                key=lambda r: (len(r.get("fields") or []), r.get("file") or "",
+                               r.get("line") or 0),
+            )
+            merged: list[dict] = []
+            seen_fields: set[str] = set()
+            for rec in [canonical] + sorted(
+                    (v for v in variants if v is not canonical),
+                    key=lambda r: (-len(r.get("fields") or []), r.get("file") or "")):
+                for field in rec.get("fields") or []:
+                    fname = (field.get("name") or "").lower()
+                    if not fname or fname in seen_fields:
+                        continue
+                    seen_fields.add(fname)
+                    merged.append(field)
+            self.records[name] = {
+                **canonical,
+                "fields": merged,
+                "variants": [
+                    {"module": v.get("module"), "file": v.get("file"),
+                     "line": v.get("line"), "fields": len(v.get("fields") or [])}
+                    for v in variants
+                ],
+            }
+            self.by_name[name] = [self.records[name]]
+        self._value_cache: dict[str, bool] = {}
+        self._field_cache: dict[tuple[str, str], tuple[str, dict] | None] = {}
+        self._children: dict[str, list[str]] = defaultdict(list)
+        for child_name, child_rec in self.records.items():
+            parent = child_rec.get("extends")
+            if parent:
+                self._children[parent].append(child_name)
+
+    # -- basic lookup -------------------------------------------------------
+    def get(self, name: str | None) -> dict | None:
+        return self.records.get((name or "").lower())
+
+    def key(self, name: str | None) -> str:
+        return (name or "").lower()
+
+    def chain(self, name: str | None, module: str | None = None) -> list[dict]:
+        chain: list[dict] = []
+        seen: set[str] = set()
+        cur = (name or "").lower()
+        while cur and cur not in seen:
+            seen.add(cur)
+            rec = None
+            if module and not chain:
+                for cand in self.by_name.get(cur, []):
+                    if (cand.get("module") or "") == module:
+                        rec = cand
+                        break
+            rec = rec or self.get(cur)
+            if not rec:
+                break
+            chain.append(rec)
+            cur = rec.get("extends") or ""
+        return chain
+
+    def descendants(self, name: str) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        stack = list(self._children.get((name or "").lower(), []))
+        while stack:
+            child = stack.pop()
+            if child in seen:
+                continue
+            seen.add(child)
+            out.append(child)
+            stack.extend(self._children.get(child, []))
+        return out
+
+    def find_field(self, owner: str, component: str) -> tuple[str, dict] | None:
+        cache_key = ((owner or "").lower(), (component or "").lower())
+        if cache_key in self._field_cache:
+            return self._field_cache[cache_key]
+        result = None
+        comp = (component or "").lower()
+        for t in self.chain(owner):
+            for f in t.get("fields") or []:
+                if (f.get("name") or "").lower() == comp:
+                    result = (t["name"], f)
+                    break
+            if result:
+                break
+        if result is None:
+            # Polymorphic CLASS(T) access: the declared type is an abstract
+            # base, while the component is declared by a subtype. Resolve only
+            # when exactly one subtype declares the component; otherwise the
+            # dynamic type is unknown and the path stays unresolved.
+            candidates = []
+            for child in self.descendants(owner):
+                rec = self.get(child) or {}
+                for f in rec.get("fields") or []:
+                    if (f.get("name") or "").lower() == comp:
+                        candidates.append((rec["name"], f))
+                        break
+            declaring = {c[0] for c in candidates}
+            if len(declaring) == 1:
+                result = candidates[0]
+        self._field_cache[cache_key] = result
+        return result
+
+    def fields_with_owner(self, name: str) -> list[dict]:
+        """Direct fields followed by inherited fields (nearest base first)."""
+        out: list[dict] = []
+        seen: set[str] = set()
+        for rec in self.chain(name):
+            inherited = rec["name"] != (name or "").lower()
+            for f in rec.get("fields") or []:
+                fname = (f.get("name") or "").lower()
+                if not fname or fname in seen:
+                    continue
+                seen.add(fname)
+                out.append({
+                    **f,
+                    "name": fname,
+                    "declaring": rec["name"],
+                    "inheritedFrom": rec["name"] if inherited else None,
+                })
+        return out
+
+    # -- value types --------------------------------------------------------
+    def is_value(self, name: str | None) -> bool:
+        key = (name or "").lower()
+        if not key:
+            return False
+        if key in self._value_cache:
+            return self._value_cache[key]
+        # Guard against recursive EXTENDS chains.
+        self._value_cache[key] = False
+        rec = self.get(key)
+        value = False
+        if rec is not None and not rec.get("extends"):
+            fields = rec.get("fields") or []
+            value = 0 < len(fields) <= MAX_VALUE_FIELDS
+            if value:
+                for f in fields:
+                    if f.get("pointer") or f.get("allocatable"):
+                        value = False
+                        break
+                    if not _is_intrinsic_type(f.get("type")):
+                        value = False
+                        break
+        self._value_cache[key] = value
+        return value
+
+    # -- path resolution ----------------------------------------------------
+    def resolve(self, entity: str) -> FieldResolution | None:
+        if not entity or not entity.startswith("field:"):
+            return None
+        path = entity.split(":", 1)[1]
+        parts = [p for p in path.split("%") if p]
+        if len(parts) < 2:
+            return FieldResolution(None, path, [], None, unresolved=True)
+        root = parts[0].lower()
+        if self.get(root) is None:
+            return FieldResolution(None, path, [], None, unresolved=True)
+        owner = root
+        chain: list[str] = []
+        steps = 0
+        i = 1
+        while i < len(parts):
+            steps += 1
+            if steps > MAX_TYPE_WALK:
+                return FieldResolution(None, path, chain, None, unresolved=True)
+            comp = parts[i].lower()
+            found = self.find_field(owner, comp)
+            if found is None:
+                return FieldResolution(None, path, chain, None, unresolved=True)
+            declaring, field_info = found
+            chain.append(declaring)
+            member = declaring + "%" + comp
+            if i == len(parts) - 1:
+                return FieldResolution(member, path, chain, None)
+            next_type = _base_type_name(field_info.get("type"))
+            if not next_type or self.get(next_type) is None:
+                # The rest of the route is not modelled: keep it unresolved
+                # instead of silently folding it.
+                return FieldResolution(None, path, chain, None, unresolved=True)
+            if self.is_value(next_type):
+                sub = "%".join(parts[i + 1:])
+                return FieldResolution(member, path, chain, sub or None)
+            owner = next_type
+            i += 1
+        return FieldResolution(None, path, chain, None, unresolved=True)
 
 
 def canonical_field_entity(entity: str, types) -> str:
-    """Merge equivalent field paths onto the type that owns the leaf.
+    """Merge equivalent field paths onto the type that declares the leaf.
 
     ``field:t_nh_state%prog%rho`` -> ``field:t_nh_prog%rho`` because ``rho``
-    is declared by ``t_nh_prog``. Paths that cannot be resolved are returned
-    unchanged (never guessed).
+    is declared by ``t_nh_prog``. Value-type tails are folded into their
+    parent member. Paths that cannot be resolved are returned unchanged
+    (never guessed).
     """
-    if not entity or not entity.startswith("field:"):
-        return entity
-    path = entity.split(":", 1)[1]
-    parts = [p for p in path.split("%") if p]
-    if len(parts) < 2:
-        return entity
-    owner = parts[0].lower()
-    for i in range(1, len(parts)):
-        comp = parts[i].lower()
-        field_info = _find_field(types, owner, comp)
-        if field_info is None:
-            return entity
-        if i == len(parts) - 1:
-            return "field:" + owner + "%" + "%".join(parts[i:])
-        next_type = (field_info.get("type") or "").split("::")[-1].lower()
-        if not next_type or types.type_info(next_type) is None:
-            return entity
-        owner = next_type
+    registry = types if isinstance(types, TypeRegistry) else TypeRegistry(types)
+    res = registry.resolve(entity)
+    if res and res.member:
+        return "field:" + res.member
     return entity
 
 
@@ -302,6 +658,70 @@ def compute_static_order(root: str, calls: list[dict],
 # source adapter: pipeline objects
 # --------------------------------------------------------------------------- #
 
+def _decl_flags(decl: dict) -> int:
+    flags = 0
+    for flag, key in ((1, "optional"), (2, "pointer"), (4, "allocatable"),
+                      (8, "target"), (16, "value"), (32, "save"),
+                      (64, "by_ref"), (128, "const")):
+        if decl.get(key):
+            flags |= flag
+    return flags
+
+
+def collect_variables(sym) -> list[dict]:
+    """Every declared holder: module variables, dummy arguments and locals."""
+    out: list[dict] = []
+    module_file = {name: (mod or {}).get("file")
+                   for name, mod in getattr(sym, "modules", {}).items()}
+    for module, variables in getattr(sym, "module_vars", {}).items():
+        file = module_file.get(module)
+        for name, decl in variables.items():
+            out.append({
+                "id": f"var:{module}::{name}",
+                "kind": "var", "name": name, "scope": module, "module": module,
+                "type": decl.get("type"), "rank": decl.get("rank") or 0,
+                "line": decl.get("line"), "file": file,
+                "flags": _decl_flags(decl),
+            })
+    for pid, proc in getattr(sym, "procs", {}).items():
+        file = proc.get("file")
+        module = proc.get("module")
+        params = proc.get("params") or []
+        param_names = {d.get("name") for d in params}
+        for decl in params:
+            out.append({
+                "id": f"param:{pid}::{decl.get('name')}",
+                "kind": "param", "name": decl.get("name"), "scope": pid,
+                "module": module, "type": decl.get("type"),
+                "rank": decl.get("rank") or 0, "line": decl.get("line"),
+                "file": file, "flags": _decl_flags(decl),
+            })
+        for decl in proc.get("decls") or []:
+            # The frontends keep dummy arguments in `decls` as well. They are
+            # already listed as parameters above; emitting a second `local:`
+            # holder makes the explorer label an argument as a local.
+            if decl.get("name") in param_names:
+                continue
+            out.append({
+                "id": f"local:{pid}::{decl.get('name')}",
+                "kind": "local", "name": decl.get("name"), "scope": pid,
+                "module": module, "type": decl.get("type"),
+                "rank": decl.get("rank") or 0, "line": decl.get("line"),
+                "file": file, "flags": _decl_flags(decl),
+            })
+    return out
+
+
+def _entity_types_from_accesses(accesses: list[dict]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for acc in accesses:
+        entity = acc.get("entity") or ""
+        decl_type = _base_type_name(acc.get("type"))
+        if entity and decl_type and not entity.startswith("field:"):
+            out.setdefault(entity, decl_type)
+    return out
+
+
 def source_from_pipeline(sym, linker, interproc, exec_info, file_meta: dict,
                          model_root: str) -> dict:
     from ..intraproc import aggregate_intents
@@ -367,12 +787,15 @@ def source_from_pipeline(sym, linker, interproc, exec_info, file_meta: dict,
     for path, m in file_meta.items():
         meta[path] = {**m, "rel_path": m.get("rel_path") or _rel(path, model_root)}
 
+    variables = collect_variables(sym)
     return {
         "functions": functions,
         "calls": calls,
         "passes": passes,
         "accesses": accesses,
         "types": sym,
+        "variables": variables,
+        "entity_types": _entity_types_from_accesses(accesses),
         "model_root": model_root,
         "file_meta": meta,
         "profiles": [],
@@ -473,11 +896,63 @@ def source_from_sqlite(out_dir: str) -> dict:
 
     type_rows = []
     try:
-        for row in con.execute("SELECT name, module, extends, fields FROM types"):
+        for row in con.execute(
+                "SELECT name, module, extends, file, line, fields FROM types"):
             type_rows.append(dict(row))
     except sqlite3.OperationalError:
-        type_rows = []
+        try:
+            for row in con.execute("SELECT name, module, extends, fields FROM types"):
+                type_rows.append(dict(row))
+        except sqlite3.OperationalError:
+            type_rows = []
+
+    variables: list[dict] = []
+    try:
+        for row in con.execute(
+                "SELECT id, kind, name, scope, module, type, rank, line, file, flags "
+                "FROM variables"):
+            variables.append(dict(row))
+    except sqlite3.OperationalError:
+        variables = []
+
+    entity_types: dict[str, str] = {}
+    entities_meta = {}
+    try:
+        for row in con.execute("SELECT id, kind, type FROM entities"):
+            decl_type = _base_type_name(row["type"])
+            if decl_type and row["kind"] in ("param", "var", "local"):
+                entity_types.setdefault(row["id"], decl_type)
+            entities_meta[row["id"]] = {"kind": row["kind"]}
+    except sqlite3.OperationalError:
+        entities_meta = {}
     con.close()
+
+    if not variables:
+        # Older databases have no variables table: reconstruct what the
+        # parameter and entity tables know about holders.
+        seen_ids = set()
+        for pid, proc in functions.items():
+            for p in proc.get("params") or []:
+                vid = f"param:{pid}::{p.get('name')}"
+                seen_ids.add(vid)
+                variables.append({
+                    "id": vid, "kind": "param", "name": p.get("name"),
+                    "scope": pid, "module": proc.get("module"),
+                    "type": p.get("type"), "rank": p.get("rank") or 0,
+                    "line": p.get("line"), "file": proc.get("file"),
+                    "flags": _decl_flags(p),
+                })
+        for vid, meta in entities_meta.items():
+            if vid in seen_ids or meta.get("kind") not in ("var", "local"):
+                continue
+            decl_type = entity_types.get(vid)
+            body = vid.split(":", 1)[1] if ":" in vid else vid
+            scope, _, name = body.rpartition("::")
+            variables.append({
+                "id": vid, "kind": meta.get("kind"), "name": name,
+                "scope": scope, "module": None, "type": decl_type,
+                "rank": 0, "line": None, "file": None, "flags": 0,
+            })
 
     file_meta = {}
     for pid, proc in functions.items():
@@ -488,12 +963,16 @@ def source_from_sqlite(out_dir: str) -> dict:
             "rel_path": _rel(path, model_root), "component": None,
             "is_test": "/test/" in path.replace("\\", "/"), "lang": proc.get("lang"),
         }
+    if not entity_types:
+        entity_types = _entity_types_from_accesses(accesses)
     return {
         "functions": functions,
         "calls": calls,
         "passes": passes,
         "accesses": accesses,
         "types": TypesView(type_rows),
+        "variables": variables,
+        "entity_types": entity_types,
         "model_root": model_root,
         "file_meta": file_meta,
         "profiles": [],
@@ -716,6 +1195,10 @@ class TraceBuild:
     shard_of: dict[str, int] = field(default_factory=dict)
     search: list[list] = field(default_factory=list)
     events_total: int = 0
+    member_routes: dict[str, list] = field(default_factory=dict)
+    member_gid: dict[str, str] = field(default_factory=dict)
+    type_totals: dict[str, dict] = field(default_factory=dict)
+    registry: TypeRegistry | None = None
 
 
 def _representative(members: list[str]) -> str:
@@ -732,19 +1215,76 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
     passes = source["passes"]
     calls = source["calls"]
     types = source["types"]
+    registry = types if isinstance(types, TypeRegistry) else TypeRegistry(types)
     node_by_fn = graph["nodeByFunction"]
     root = graph.get("rootId")
 
     uf = UnionFind()
     entity_kind: dict[str, str] = {}
+    field_res: dict[str, FieldResolution] = {}
+    preferred: dict[str, str] = {}
 
-    def canonical(e: str) -> str:
-        return canonical_field_entity(e, types)
+    # Declared type of every holder (param / var / local).
+    entity_types: dict[str, str] = dict(source.get("entity_types") or {})
+    for pid, proc in functions.items():
+        for p in proc.get("params") or []:
+            decl_type = _base_type_name(p.get("type"))
+            if decl_type:
+                entity_types.setdefault(f"param:{pid}::{p.get('name')}", decl_type)
+    for var in source.get("variables") or []:
+        decl_type = _base_type_name(var.get("type"))
+        if decl_type and var.get("id"):
+            entity_types.setdefault(var["id"], decl_type)
+
+    def decl_type(entity: str) -> str | None:
+        if not entity:
+            return None
+        if entity.startswith("field:"):
+            res = field_res.get(entity)
+            if not res or not res.member:
+                return None
+            declaring, _, member = res.member.partition("%")
+            found = registry.find_field(declaring, member)
+            return _base_type_name(found[1].get("type")) if found else None
+        return entity_types.get(entity)
+
+    def is_struct_type(name: str | None) -> bool:
+        return bool(name) and registry.get(name) is not None and not registry.is_value(name)
 
     def add_entity(e: str) -> str:
-        e = canonical(e)
         uf.add(e)
         entity_kind.setdefault(e, _entity_kind(e))
+        return e
+
+    def add_field(e: str) -> str:
+        """Add a field entity plus its route and return the member identity."""
+        res = registry.resolve(e)
+        if res is None:
+            return add_entity(e)
+        route_entity = "field:" + res.route
+        if res.member:
+            member_entity = "field:" + res.member
+            preferred.setdefault(member_entity, member_entity)
+        else:
+            member_entity = e
+        field_res[e] = res
+        field_res[member_entity] = res
+        field_res[route_entity] = res
+        add_entity(member_entity)
+        add_entity(route_entity)
+        uf.union(member_entity, route_entity)
+        return member_entity
+
+    def canonical(e: str) -> str:
+        if e and e.startswith("field:"):
+            return add_field(e)
+        return add_entity(e)
+
+    def event_entity(e: str) -> str:
+        if e and e.startswith("field:"):
+            res = field_res.get(e) or registry.resolve(e)
+            if res and res.route:
+                return "field:" + res.route
         return e
 
     # Every parameter becomes an entity even when it is never accessed, so the
@@ -755,30 +1295,27 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
         for p in proc.get("params") or []:
             add_entity(f"param:{pid}::{p.get('name')}")
 
-    # Field accesses stay in their leaf-owned field group. Joining every field
-    # to its root parameter would merge all components of a derived type (and
-    # then every unrelated value passed through that object) into one group.
-    # Derived-type parameters therefore have a lightweight group of their own;
-    # the field rows in the parameter card remain individually traceable via
-    # the data search.
+    # Field accesses are merged onto the type that declares the leaf. Every
+    # raw route stays in the group so the explorer can filter by route.
     for acc in accesses:
-        if not acc.get("entity"):
-            continue
-        add_entity(acc.get("entity"))
+        entity = acc.get("entity")
+        if entity:
+            canonical(entity)
 
-    # Passes are *directed* edges. Unioning every call site's actual with the
-    # callee formal would merge thousands of unrelated values through utility
-    # routines (every error-message local passed to `finish` became one group).
-    # A formal is joined to its actuals only when they all resolve to the same
-    # data entity: `hydro_adjust::rho` receives the same `t_nh_prog%rho` from
-    # many callers, so it joins that field; `mpi::finish::text` receives many
-    # different locals, so it does not merge them.
+    # Passes are *directed* edges. A struct-typed formal is only joined to
+    # actuals of the same declared type; field actuals feed the member group,
+    # never the formal. Other formals keep the old "all actuals agree" rule.
     formal_actuals: dict[str, set[str]] = defaultdict(set)
     for p in passes:
         if not p.get("formal") or not p.get("actual"):
             continue
         formal = add_entity(p.get("formal"))
-        actual = add_entity(p.get("actual"))
+        actual = canonical(p.get("actual"))
+        ftype = decl_type(formal)
+        if is_struct_type(ftype):
+            atype = decl_type(actual)
+            if str(actual).startswith("field:") or not atype or atype != ftype:
+                continue
         formal_actuals[formal].add(actual)
 
     for _ in range(6):
@@ -800,28 +1337,35 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             left, right = alias.get("left"), alias.get("right")
             if not left or not right:
                 continue
-            # The alias RHS is generally a member path; the LHS is the local
-            # alias name. The linker already resolves accesses through the
-            # alias, so this mainly joins the two spellings.
-            l = canonical("field:" + left.replace("%", "%") if left.startswith("field:") else "field:" + left)
-            r = canonical("field:" + right if not right.startswith("field:") else right)
-            # Only add well-formed paths.
-            if l.count("%") >= 1 and r.count("%") >= 1:
-                uf.union(add_entity(l), add_entity(r))
+            l = "field:" + left if not left.startswith("field:") else left
+            r = "field:" + right if not right.startswith("field:") else right
+            if l.count("%") >= 2 and r.count("%") >= 2:
+                uf.union(canonical(l), canonical(r))
 
     raw_groups = uf.groups()
     groups: dict[str, dict] = {}
     group_of: dict[str, str] = {}
     shard_of: dict[str, int] = {}
-    member_of_group: dict[str, list[str]] = {}
+    member_gid: dict[str, str] = {}
 
     for members in raw_groups.values():
-        rep = _representative(members)
+        member_path = None
+        for m in members:
+            res = field_res.get(m)
+            if res and res.member:
+                member_path = res.member
+                break
+        rep = preferred.get(next((m for m in members if m in preferred), ""), None)
+        if rep is None:
+            rep = _representative(members)
         gid = _sha1(rep)[:12]
         # Extremely unlikely collision; keep ids unique deterministically.
         if gid in groups and groups[gid]["entity"] != rep:
             gid = _sha1(rep + "|" + ",".join(sorted(members)))[:12]
         shard = int(_sha1(rep)[:2], 16) % TRACE_SHARDS
+        unresolved = bool(member_path is None and any(
+            _entity_kind(m) == "field" and not (field_res.get(m) and field_res[m].member)
+            for m in members))
         groups[gid] = {
             "id": gid,
             "entity": rep,
@@ -829,9 +1373,14 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             "entities": sorted(members),
             "events": [],
             "backward": {},
+            "routes": [],
+            "member": member_path,
+            "declaringType": member_path.split("%", 1)[0] if member_path else None,
+            "unresolved": unresolved,
             "shard": shard,
         }
-        member_of_group[gid] = members
+        if member_path:
+            member_gid[member_path] = gid
         for m in members:
             group_of[m] = gid
         shard_of[gid] = shard
@@ -867,10 +1416,12 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
         pid = acc.get("proc")
         if pid not in node_by_fn:
             continue
-        ent = canonical(acc.get("entity") or "")
+        raw = acc.get("entity") or ""
+        ent = canonical(raw)
         gid = group_of.get(ent)
         if not gid:
             continue
+        route = event_entity(raw)
         mode = acc.get("mode") or "read"
         via = acc.get("via") or "assign"
         if via == "allocate":
@@ -883,16 +1434,25 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             role = ROLE_WRITE | ROLE_READ
         else:
             role = ROLE_READ
-        row = event_row(gid, pid, acc.get("line"), role, via, ent)
+        row = event_row(gid, pid, acc.get("line"), role, via, route)
         if row:
             groups[gid]["events"].append(row)
 
     # Passes. `incoming[formal]` is the upstream binding used by backward paths.
     incoming: dict[str, list[dict]] = defaultdict(list)
     for p in passes:
-        formal = canonical(p.get("formal") or "")
-        actual = canonical(p.get("actual") or "")
-        gid = group_of.get(formal) or group_of.get(actual)
+        formal_raw = p.get("formal") or ""
+        actual_raw = p.get("actual") or ""
+        formal = canonical(formal_raw)
+        actual = canonical(actual_raw)
+        # A field actual belongs to the member group; the formal keeps its own
+        # group and receives a directed pass edge instead of a union.
+        if actual_raw.startswith("field:"):
+            gid = group_of.get(actual) or group_of.get(formal)
+            event_actual = event_entity(actual_raw)
+        else:
+            gid = group_of.get(formal) or group_of.get(actual)
+            event_actual = event_entity(actual_raw)
         if not gid:
             continue
         caller, callee = p.get("caller"), p.get("callee")
@@ -903,7 +1463,7 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             "formal": formal, "actual": actual, "mode": p.get("mode") or "read",
         })
         row = event_row(gid, caller, p.get("line"), ROLE_PASS, "call",
-                        actual, callee, formal)
+                        event_actual, callee, formal)
         if row:
             groups[gid]["events"].append(row)
 
@@ -920,13 +1480,8 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
     for gid, entities in by_group_entity.items():
         for ent, indexes in entities.items():
             kind = _entity_kind(ent)
-            # Fields that are members of an allocated parent have no explicit
-            # allocate record of their own; their first direct write is the
-            # point where the data first exists.
             if kind not in ("local", "var", "field"):
                 continue
-            # A pure write introduces the value; a read-modify-write updates an
-            # existing one. Prefer the first pure write as the creation point.
             indexes.sort(key=lambda i: (
                 0 if (groups[gid]["events"][i][2] & ROLE_WRITE and
                       not groups[gid]["events"][i][2] & ROLE_READ) else 1,
@@ -938,7 +1493,7 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
                     row[2] = (row[2] & ROLE_READ) | ROLE_CREATE
                     break
 
-    # Origin + counts + backward paths.
+    # Origin + route provenance + counts + backward paths.
     for gid, rec in groups.items():
         rec["events"].sort(key=lambda e: (seq(graph["ids"][e[0]]) if e[0] < len(graph["ids"]) else 1 << 30, e[1]))
         entities = rec["entities"]
@@ -950,10 +1505,10 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
 
         create_events = [ev for ev in rec["events"] if ev[2] & ROLE_CREATE]
         origin_candidate_set = set(origin_candidates)
-        preferred = [ev for ev in create_events
-                     if ev[4] >= 0 and entities[ev[4]] in origin_candidate_set]
-        if preferred:
-            origin_event = preferred[0]
+        preferred_events = [ev for ev in create_events
+                            if ev[4] >= 0 and entities[ev[4]] in origin_candidate_set]
+        if preferred_events:
+            origin_event = preferred_events[0]
         elif create_events:
             origin_event = create_events[0]
         elif rec["events"]:
@@ -971,9 +1526,6 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
                 "node": origin_event[0],
             }
         else:
-            # Searchable group with no accesses (e.g. an unread parameter):
-            # point at the declaration when it is a dummy argument, otherwise
-            # at the function that owns it.
             owner = _owner_function(rec["entity"])
             node = node_by_fn.get(owner)
             line = functions.get(owner, {}).get("line")
@@ -1007,6 +1559,32 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             "events": len(rec["events"]),
         }
 
+        # Route summary: [route, reads, writes, creates, functionCount].
+        route_stats: dict[str, dict] = {}
+        for ev in rec["events"]:
+            if ev[4] < 0:
+                continue
+            ent = entities[ev[4]]
+            if not ent.startswith("field:"):
+                continue
+            route = ent.split(":", 1)[1]
+            stat = route_stats.setdefault(route, {
+                "read": 0, "write": 0, "create": 0, "fns": set(),
+            })
+            if ev[2] & ROLE_CREATE:
+                stat["create"] += 1
+            if ev[2] & ROLE_WRITE:
+                stat["write"] += 1
+            if ev[2] & ROLE_READ:
+                stat["read"] += 1
+            stat["fns"].add(ev[0])
+        if route_stats:
+            rec["routes"] = sorted(
+                [[route, s["read"], s["write"], s["create"], len(s["fns"])]
+                 for route, s in route_stats.items()],
+                key=lambda r: (-(r[1] + r[2] + r[3]), -r[4], r[0]),
+            )
+
         # Folder/file summary for large full traces.
         folder_counts: dict[str, int] = defaultdict(int)
         file_counts: dict[str, int] = defaultdict(int)
@@ -1029,26 +1607,30 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             if chain:
                 rec["backward"][ent] = chain
 
-    # Search index: only fields, parameters and module variables, as planned.
+    # Search index: fields, parameters, module variables/locals and types.
     search_rows: list[list] = []
     seen_keys: set[tuple[str, str]] = set()
-    kind_rank = {"field": 0, "param": 1, "var": 2}
+    kind_rank = {"field": 0, "param": 1, "var": 2, "struct": 3, "local": 4}
     for gid, rec in groups.items():
         members = rec["entities"]
         counts = rec["counts"]
         names: set[str] = set()
         kind = rec["kind"]
-        for ent in members:
-            ek = _entity_kind(ent)
-            if ek not in kind_rank:
-                continue
-            body = ent.split(":", 1)[1] if ":" in ent else ent
-            if ek == "field":
-                leaf = body.split("%")[-1]
-                names.add(body)
-                names.add("%" + leaf)
-                names.add(leaf)
-            elif ek == "param":
+        if kind not in kind_rank:
+            continue
+        if kind == "field":
+            body = rec.get("member") or rec["entity"].split(":", 1)[1]
+            leaf = body.split("%")[-1]
+            names.add(body)
+            names.add("%" + leaf)
+            names.add(leaf)
+            for route in rec.get("routes") or []:
+                names.add(route[0])
+            row_type = rec.get("declaringType") or ""
+            row_member = body
+        else:
+            body = rec["entity"].split(":", 1)[1]
+            if kind == "param":
                 owner, _, pname = body.rpartition("::")
                 names.add(body)
                 names.add(pname)
@@ -1057,18 +1639,60 @@ def build_traces(source: dict, graph: dict) -> TraceBuild:
             else:
                 names.add(body)
                 names.add(body.rsplit("::", 1)[-1])
+            row_type = decl_type(rec["entity"]) or ""
+            row_member = ""
         for name in names:
             key = (name, gid)
             if not name or key in seen_keys:
                 continue
             seen_keys.add(key)
             search_rows.append([name, gid, kind_rank.get(kind, 9),
-                                counts["read"], counts["write"]])
-    search_rows.sort(key=lambda r: (r[0], r[2], -r[3] - r[4], r[1]))
+                                counts["read"], counts["write"],
+                                row_type, row_member, counts["functions"]])
+    # One row per type so `@cartesian_center` also offers its declaring type.
+    for type_key, rec in registry.records.items():
+        names = {type_key}
+        if rec.get("module"):
+            names.add(rec["module"] + "::" + type_key)
+        total_read = total_write = total_fns = 0
+        for group in groups.values():
+            if group.get("declaringType") == type_key:
+                total_read += group["counts"]["read"]
+                total_write += group["counts"]["write"]
+                total_fns = max(total_fns, group["counts"]["functions"])
+        for name in names:
+            key = (name, type_key)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            search_rows.append([name, type_key, kind_rank["struct"],
+                                total_read, total_write, type_key, "", total_fns])
+    # For a name shared by a type and many parameters/variables, the type row
+    # must come first: the browser scans a bounded prefix window and would
+    # otherwise never reach it (`@patch` with hundreds of Fortran arguments).
+    search_rows.sort(key=lambda r: (
+        r[0], 0 if r[2] == kind_rank["struct"] else 1, r[2],
+        -r[3] - r[4], r[1],
+    ))
+
+    member_routes = {rec["member"]: rec.get("routes", [])
+                     for rec in groups.values() if rec.get("member")}
+    type_totals: dict[str, dict] = {}
+    for rec in groups.values():
+        key = rec.get("declaringType")
+        if not key:
+            continue
+        total = type_totals.setdefault(key, {"read": 0, "write": 0,
+                                             "create": 0, "functions": 0})
+        total["read"] += rec["counts"]["read"]
+        total["write"] += rec["counts"]["write"]
+        total["create"] += rec["counts"]["create"]
+        total["functions"] = max(total["functions"], rec["counts"]["functions"])
 
     return TraceBuild(groups=groups, group_of=group_of, shard_of=shard_of,
-                      search=search_rows,
-                      events_total=sum(len(r["events"]) for r in groups.values()))
+                      search=search_rows, events_total=sum(len(r["events"]) for r in groups.values()),
+                      member_routes=member_routes, member_gid=member_gid,
+                      type_totals=type_totals, registry=registry)
 
 
 def _owner_function(entity: str) -> str | None:
@@ -1201,6 +1825,7 @@ def _entity_event_count(group: dict, entity: str) -> int:
 def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
                           vis_dir: str) -> dict:
     functions = source["functions"]
+    registry = TypeRegistry(source["types"])
     node_by_fn = graph["nodeByFunction"]
     file_meta = source.get("file_meta", {})
     model_root = source.get("model_root") or ""
@@ -1214,7 +1839,7 @@ def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
     incoming_sources: dict[str, list[dict]] = defaultdict(list)
     seen_sources: dict[str, set[tuple[str, int]]] = defaultdict(set)
     for p in source.get("passes") or []:
-        formal = canonical_field_entity(p.get("formal") or "", source["types"])
+        formal = canonical_field_entity(p.get("formal") or "", registry)
         if not formal:
             continue
         caller = p.get("caller")
@@ -1245,7 +1870,7 @@ def build_function_shards(source: dict, graph: dict, trace: TraceBuild,
         params = []
         for p in proc.get("params") or []:
             pname = p.get("name")
-            entity = canonical_field_entity(f"param:{pid}::{pname}", source["types"])
+            entity = canonical_field_entity(f"param:{pid}::{pname}", registry)
             gid = trace.group_of.get(entity)
             flags = 0
             for flag, key in ((1, "optional"), (2, "pointer"), (4, "allocatable"),
@@ -1315,6 +1940,10 @@ def build_trace_shards(trace: TraceBuild, vis_dir: str) -> dict:
             "backward": rec["backward"],
             "origin": rec["origin"],
             "counts": rec["counts"],
+            "routes": rec.get("routes", []),
+            "member": rec.get("member"),
+            "declaringType": rec.get("declaringType"),
+            "unresolved": rec.get("unresolved", False),
             "folders": rec["folders"],
             "files": rec["files"],
             "vias": VIA_NAMES,
@@ -1332,6 +1961,329 @@ def build_trace_shards(trace: TraceBuild, vis_dir: str) -> dict:
     return {"shards": written, "compressed_bytes": size}
 
 
+# --------------------------------------------------------------------------- #
+# struct / variable explorer data
+# --------------------------------------------------------------------------- #
+
+STRUCT_SHARDS = 32
+
+
+def _struct_shard(key: str) -> str:
+    return f"struct/{(int(_sha1(key)[:8], 16) % STRUCT_SHARDS):02x}.json"
+
+
+def _field_flags(field: dict) -> list[str]:
+    flags = []
+    for name, key in (("pointer", "pointer"), ("allocatable", "allocatable"),
+                      ("target", "target"), ("optional", "optional"),
+                      ("value", "value"), ("parameter", "parameter"),
+                      ("save", "save"), ("class", "class")):
+        if field.get(key):
+            flags.append(name)
+    return flags
+
+
+def _empty_touch() -> dict:
+    return {"fn": {}, "edges": set(), "origin": None,
+            "folders": defaultdict(int), "files": defaultdict(int)}
+
+
+def _merge_touch(dst: dict, src: dict) -> dict:
+    for node, mask in src["fn"].items():
+        dst["fn"][node] = dst["fn"].get(node, 0) | mask
+    dst["edges"].update(src["edges"])
+    if dst["origin"] is None and src.get("origin"):
+        dst["origin"] = src["origin"]
+    for key, value in src["folders"].items():
+        dst["folders"][key] += value
+    for key, value in src["files"].items():
+        dst["files"][key] += value
+    return dst
+
+
+def _group_touch(rec: dict) -> dict:
+    touch = _empty_touch()
+    if not rec:
+        return touch
+    for ev in rec.get("events") or []:
+        node = ev[0]
+        touch["fn"][node] = touch["fn"].get(node, 0) | ev[2]
+        other = ev[5] if len(ev) > 5 else -1
+        if (ev[2] & ROLE_PASS) and other is not None and other >= 0:
+            touch["edges"].add((node, other))
+    origin = rec.get("origin") or {}
+    if origin.get("node") is not None:
+        touch["origin"] = [origin.get("node"), origin.get("line") or 0,
+                           origin.get("file"), origin.get("name")]
+    for key, value in rec.get("folders") or []:
+        touch["folders"][key] += value
+    for key, value in rec.get("files") or []:
+        touch["files"][key] += value
+    return touch
+
+
+def _touch_payload(touch: dict) -> dict:
+    return {
+        "fn": sorted([int(node), int(mask)] for node, mask in touch["fn"].items()),
+        "edges": sorted([int(a), int(b)] for a, b in touch["edges"]),
+        "origin": touch.get("origin"),
+        "folders": sorted(touch["folders"].items(), key=lambda kv: (-kv[1], kv[0]))[:40],
+        "files": sorted(touch["files"].items(), key=lambda kv: (-kv[1], kv[0]))[:80],
+    }
+
+
+def build_structs(source: dict, trace: TraceBuild, graph: dict,
+                  vis_dir: str) -> dict:
+    """Write ``structs.json`` and lazy touch shards; return summary counts."""
+    registry = trace.registry or TypeRegistry(source["types"])
+    functions = source["functions"]
+    member_group = trace.member_gid
+
+    # --- holders (variables / parameters / locals of each type) -----------
+    holders: dict[str, list[dict]] = defaultdict(list)
+    seen_holder: set[tuple[str, str]] = set()
+    variables = list(source.get("variables") or [])
+    for pid, proc in functions.items():
+        for p in proc.get("params") or []:
+            variables.append({
+                "id": f"param:{pid}::{p.get('name')}",
+                "kind": "param", "name": p.get("name"), "scope": pid,
+                "module": proc.get("module"), "type": p.get("type"),
+                "line": p.get("line"), "file": proc.get("file"),
+            })
+    for var in variables:
+        type_key = _base_type_name(var.get("type"))
+        if not type_key or registry.get(type_key) is None:
+            continue
+        vid = var.get("id") or f"{var.get('kind')}:{var.get('scope')}::{var.get('name')}"
+        if (type_key, vid) in seen_holder:
+            continue
+        seen_holder.add((type_key, vid))
+        gid = trace.group_of.get(vid)
+        rec = trace.groups.get(gid) or {}
+        sample = []
+        if rec:
+            for ev in rec.get("events") or []:
+                fn_id = graph["ids"][ev[0]] if ev[0] < len(graph["ids"]) else None
+                name = functions.get(fn_id, {}).get("name") if fn_id else None
+                if name and name not in sample:
+                    sample.append(name)
+                if len(sample) >= 3:
+                    break
+        kind = {"param": "parameter", "var": "module variable",
+                "local": "local"}.get(var.get("kind"), var.get("kind") or "variable")
+        holders[type_key].append({
+            "id": vid, "name": var.get("name"), "kind": kind,
+            "scope": var.get("scope"), "module": var.get("module"),
+            "line": var.get("line"),
+            "file": _rel(var.get("file"), source.get("model_root")),
+            "count": (rec.get("counts") or {}).get("functions", 0),
+            "fns": sample,
+        })
+    for type_key in holders:
+        # Collapse repeated dummy arguments of the same name: the chip list is
+        # "known as", not a function inventory.
+        collapsed: dict[tuple, dict] = {}
+        for holder in holders[type_key]:
+            key = (holder["name"],)
+            kept = collapsed.get(key)
+            if kept is None or holder["count"] > kept["count"]:
+                collapsed[key] = holder
+        holders[type_key] = sorted(collapsed.values(),
+                                   key=lambda h: (-h["count"], h["name"] or "", h["id"]))
+
+    # --- containment edges ------------------------------------------------
+    parents: dict[str, list] = defaultdict(list)
+    for type_key, rec in registry.records.items():
+        for field in rec.get("fields") or []:
+            child = _base_type_name(field.get("type"))
+            if child and registry.get(child) is not None:
+                parents[child].append([type_key, (field.get("name") or "").lower()])
+
+    # --- touch sets, rolled up through containment ------------------------
+    def field_member(field: dict) -> str:
+        return f"{field['declaring']}%{field['name']}"
+
+    def member_touch(member: str) -> dict:
+        gid = member_group.get(member)
+        return _group_touch(trace.groups.get(gid) or {})
+
+    rollup_cache: dict[str, dict] = {}
+
+    def rollup(type_key: str, visiting: set[str]) -> tuple[dict, bool]:
+        if type_key in rollup_cache:
+            return rollup_cache[type_key], True
+        if type_key in visiting or registry.get(type_key) is None:
+            return _empty_touch(), False
+        visiting = set(visiting)
+        visiting.add(type_key)
+        touch = _empty_touch()
+        clean = True
+        rec = registry.get(type_key) or {}
+        for field in registry.fields_with_owner(type_key):
+            member = field_member(field)
+            merged = member_touch(member)
+            child = _base_type_name(field.get("type"))
+            if child and registry.get(child) is not None and not registry.is_value(child):
+                sub, sub_clean = rollup(child, visiting)
+                _merge_touch(merged, sub)
+                clean = clean and sub_clean
+            _merge_touch(touch, merged)
+        if clean:
+            rollup_cache[type_key] = touch
+        return touch, clean
+
+    touch_shards: dict[str, dict] = defaultdict(dict)
+    for type_key, rec in registry.records.items():
+        roll, _clean = rollup(type_key, set())
+        members = {}
+        for field in registry.fields_with_owner(type_key):
+            member = field_member(field)
+            merged = member_touch(member)
+            child = _base_type_name(field.get("type"))
+            if child and registry.get(child) is not None and not registry.is_value(child):
+                sub, _ = rollup(child, {type_key})
+                _merge_touch(merged, sub)
+            members[member] = _touch_payload(merged)
+        payload = _touch_payload(roll)
+        payload["members"] = members
+        touch_shards[_struct_shard(type_key)][type_key] = payload
+
+    # --- reverse index: which data does a function touch? -----------------
+    fn_usage: dict[int, dict[tuple, int]] = defaultdict(dict)
+    for gid, rec in trace.groups.items():
+        kind = rec.get("kind")
+        if kind == "field":
+            key = rec.get("member") or rec["entity"].split(":", 1)[1]
+            entry_kind = 0
+        elif kind in ("param", "var", "local"):
+            key = rec["entity"]
+            entry_kind = 1
+        else:
+            continue
+        for ev in rec.get("events") or []:
+            node = ev[0]
+            k = (entry_kind, key, gid)
+            fn_usage[node][k] = fn_usage[node].get(k, 0) | ev[2]
+    fn_shards: dict[str, dict] = defaultdict(dict)
+    for node, entries in fn_usage.items():
+        shard = f"struct/fn/{node % STRUCT_SHARDS:02x}.json"
+        fn_shards[shard][node] = sorted(
+            [[k[0], k[1], k[2], mask] for k, mask in entries.items()],
+            key=lambda r: (-r[3], r[1]))
+
+    # --- route rollups for struct members without their own group ----------
+    # ``t_patch%cells`` has no direct access of its own; its usage is the union
+    # of every ``t_patch%cells%…`` route. Index every prefix once so the type
+    # page can still show a route table for such a member.
+    aggregate_routes: dict[str, dict] = defaultdict(lambda: defaultdict(
+        lambda: {"read": 0, "write": 0, "create": 0, "fns": 0}))
+    for rec in trace.groups.values():
+        for route, reads, writes, creates, fns in rec.get("routes") or []:
+            parts = route.split("%")
+            for i in range(2, len(parts) + 1):
+                prefix = "%".join(parts[:i])
+                stat = aggregate_routes[prefix][route]
+                stat["read"] += reads
+                stat["write"] += writes
+                stat["create"] += creates
+                stat["fns"] = max(stat["fns"], fns)
+
+    def routes_for_member(member: str) -> list[list]:
+        own = trace.member_routes.get(member)
+        if own:
+            return own
+        stats = aggregate_routes.get(member) or {}
+        return sorted(
+            [[route, s["read"], s["write"], s["create"], s["fns"]]
+             for route, s in stats.items()],
+            key=lambda r: (-(r[1] + r[2] + r[3]), -r[4], r[0]),
+        )
+
+    # --- type pages -------------------------------------------------------
+    types_payload: dict[str, dict] = {}
+    for type_key, rec in registry.records.items():
+        fields = []
+        for field in registry.fields_with_owner(type_key):
+            member = field_member(field)
+            owner_rec = registry.get(field["declaring"]) or {}
+            fields.append({
+                "name": field["name"],
+                "type": _base_type_name(field.get("type")) or "",
+                "rawType": field.get("type") or "",
+                "rank": field.get("rank") or 0,
+                "flags": _field_flags(field),
+                "line": _find_component_line(
+                    owner_rec.get("file"), owner_rec.get("name") or field["declaring"],
+                    field["name"], field.get("line")),
+                "member": member,
+                "owner": field["declaring"],
+                "inheritedFrom": field.get("inheritedFrom"),
+                "gid": member_group.get(member),
+                "value": bool(field.get("type") and registry.is_value(
+                    _base_type_name(field.get("type")))),
+            })
+        total = trace.type_totals.get(type_key, {})
+        types_payload[type_key] = {
+            "name": rec["name"],
+            "module": rec.get("module"),
+            "file": _rel(rec.get("file"), source.get("model_root")),
+            "line": rec.get("line"),
+            "extends": rec.get("extends"),
+            "value": registry.is_value(type_key),
+            "fields": fields,
+            "parents": sorted(parents.get(type_key, [])),
+            "holders": holders.get(type_key, []),
+            "routes": {
+                field["member"]: routes_for_member(field["member"])
+                for field in fields
+            },
+            "counts": {
+                "read": total.get("read", 0), "write": total.get("write", 0),
+                "create": total.get("create", 0),
+                "functions": total.get("functions", 0),
+            },
+            "shard": _struct_shard(type_key),
+        }
+
+    unresolved = []
+    for gid, rec in trace.groups.items():
+        if not rec.get("unresolved"):
+            continue
+        unresolved.append({
+            "route": rec["entity"].split(":", 1)[1],
+            "gid": gid,
+            "reads": rec["counts"]["read"],
+            "writes": rec["counts"]["write"],
+            "functions": rec["counts"]["functions"],
+        })
+    unresolved.sort(key=lambda r: (-r["reads"] - r["writes"], r["route"]))
+
+    payload = {
+        "version": 1,
+        "types": types_payload,
+        "unresolved": unresolved[:5000],
+        "shards": sorted(touch_shards.keys()) + sorted(fn_shards.keys()),
+    }
+    sizes = _write_json(os.path.join(vis_dir, "structs.json"), payload)
+
+    shard_count = 0
+    for shard, content in touch_shards.items():
+        _write_json(os.path.join(vis_dir, shard), {"types": content})
+        shard_count += 1
+    for shard, content in fn_shards.items():
+        _write_json(os.path.join(vis_dir, shard), {"functions": content})
+        shard_count += 1
+
+    return {
+        "types": len(types_payload),
+        "values": sum(1 for rec in types_payload.values() if rec["value"]),
+        "unresolved": len(unresolved),
+        "touchShards": shard_count,
+        "bytes": sizes.get("br", sizes["raw"]),
+    }
+
+
 def build_search_index(trace: TraceBuild, vis_dir: str) -> dict:
     rows = trace.search
     payload = {
@@ -1340,6 +2292,9 @@ def build_search_index(trace: TraceBuild, vis_dir: str) -> dict:
         "kinds": [r[2] for r in rows],
         "reads": [r[3] for r in rows],
         "writes": [r[4] for r in rows],
+        "types": [r[5] if len(r) > 5 else "" for r in rows],
+        "members": [r[6] if len(r) > 6 else "" for r in rows],
+        "fns": [r[7] if len(r) > 7 else 0 for r in rows],
     }
     sizes = _write_json(os.path.join(vis_dir, "search.json"), payload)
     return {"entries": len(rows), **sizes}
@@ -1375,7 +2330,7 @@ def build(source: dict, vis_dir: str, graph_only: bool = False) -> dict:
     os.makedirs(vis_dir, exist_ok=True)
     # Remove stale shards from a previous run so deleted components do not
     # leave orphaned files behind.
-    for sub in ("fn", "trace"):
+    for sub in ("fn", "trace", "struct"):
         path = os.path.join(vis_dir, sub)
         if os.path.isdir(path):
             shutil.rmtree(path)
@@ -1418,6 +2373,7 @@ def build(source: dict, vis_dir: str, graph_only: bool = False) -> dict:
     }
     result["functions"] = build_function_shards(source, graph, trace, vis_dir)
     result["search"] = build_search_index(trace, vis_dir)
+    result["structs"] = build_structs(source, trace, graph, vis_dir)
     result["vis_dir"] = vis_dir
     return result
 
@@ -1459,6 +2415,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"functions: {res['functions']['functions']} in {res['functions']['shards']} shards")
         print(f"search: {res['search']['entries']} entries, "
               f"{res['search'].get('br', res['search']['raw']) / 1e6:.1f} MB compressed")
+        st = res.get("structs") or {}
+        print(f"structs: {st.get('types', 0)} types ({st.get('values', 0)} value types), "
+              f"{st.get('unresolved', 0)} unresolved field routes, "
+              f"{st.get('touchShards', 0)} touch shards")
         if not args.no_layout:
             graph_path = os.path.join(vis_dir, "graph.json")
             layout_path = os.path.join(vis_dir, "layout.json")

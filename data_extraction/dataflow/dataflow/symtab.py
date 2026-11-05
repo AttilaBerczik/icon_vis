@@ -157,6 +157,22 @@ class SymbolTable:
                     self.generic[(name, iface["name"])] = iface.get("procedures", [])
 
             for t in f.get("types", []):
+                # Declaration location is needed by the struct explorer. The
+                # frontend type record carries the line; the file lives on the
+                # enclosing per-file fact record.
+                line = t.get("line")
+                if not line:
+                    # fparser does not expose a span for Derived_Type_Def in
+                    # some builds; the first component line is the closest
+                    # recorded declaration position.
+                    field_lines = [fx.get("line") for fx in t.get("fields") or []
+                                   if fx.get("line")]
+                    if field_lines:
+                        line = min(field_lines)
+                t = {**t,
+                     "file": t.get("file") or f.get("file"),
+                     "rel_path": t.get("rel_path") or rel,
+                     "line": line}
                 self.types[t["name"]].append(t)
                 for b in t.get("bindings", []):
                     self.bindings[t["name"]].append({**b, "type_module": t.get("module")})
@@ -183,6 +199,30 @@ class SymbolTable:
                     q = p.get("qualified")
                     if q:
                         self.cpp_by_name[q.split("::")[-1]].append(pid)
+
+        # C++ out-of-line definitions carry a qualifier that can be a class
+        # (`Patch::init`) or a namespace (`graupel::run`). Now that every type
+        # is known, classify it: the last qualifier that names a type is the
+        # class scope used for `this->field`, everything before it is the
+        # namespace.
+        for p in self.procs.values():
+            if p.get("lang") != "cpp":
+                continue
+            parts = (p.get("qualified") or "").split("::")
+            if len(parts) < 2:
+                continue
+            class_index = None
+            for i in range(len(parts) - 2, -1, -1):
+                if parts[i] in self.types:
+                    class_index = i
+                    break
+            if class_index is not None:
+                p["class"] = parts[class_index]
+                p["module"] = "::".join(parts[:class_index]) or None
+            elif len(parts) > 1:
+                # A free function qualified by a namespace; the immediate
+                # namespace is the module.
+                p["module"] = parts[-2]
 
         # Keep insertion order but drop duplicate ids in name indexes.
         for k, v in list(self.proc_by_name.items()):

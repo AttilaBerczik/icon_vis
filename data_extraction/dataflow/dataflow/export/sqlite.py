@@ -25,7 +25,12 @@ def build(path: str, sym, linker, interproc, exec_info, residency) -> dict:
         );
         CREATE TABLE entities (id TEXT PRIMARY KEY, kind TEXT, type TEXT);
         CREATE TABLE types (
-            name TEXT, module TEXT, extends TEXT, fields TEXT
+            name TEXT, module TEXT, extends TEXT, fields TEXT,
+            file TEXT, line INTEGER
+        );
+        CREATE TABLE variables (
+            id TEXT PRIMARY KEY, kind TEXT, name TEXT, scope TEXT, module TEXT,
+            type TEXT, rank INTEGER, line INTEGER, file TEXT, flags INTEGER
         );
         CREATE TABLE accesses (
             function_id TEXT, entity TEXT, mode TEXT, line INTEGER, via TEXT,
@@ -84,11 +89,53 @@ def build(path: str, sym, linker, interproc, exec_info, residency) -> dict:
             entity, entity.split(":", 1)[0], a.get("type")))
     # Derived-type table. The static viewer exporter uses it to merge equivalent
     # field paths (t_nh_state%prog%rho == t_nh_prog%rho).
+    from .vis import _find_component_line, _find_type_declaration_line
     for name, entries in sym.types.items():
         for t in entries:
-            cur.execute("INSERT INTO types VALUES (?,?,?,?)", (
+            file = t.get("file") or t.get("rel_path")
+            line = _find_type_declaration_line(file, name)
+            if not line:
+                line = t.get("line")
+            fields = []
+            for field in t.get("fields") or []:
+                field = dict(field)
+                field["line"] = _find_component_line(
+                    file, name, field.get("name"), field.get("line"))
+                fields.append(field)
+            cur.execute("INSERT INTO types VALUES (?,?,?,?,?,?)", (
                 t.get("name") or name, t.get("module"), t.get("extends"),
-                json.dumps(t.get("fields") or [], separators=(",", ":"))))
+                json.dumps(fields, separators=(",", ":")),
+                file, line))
+
+    def _flags(decl: dict) -> int:
+        flags = 0
+        for flag, key in ((1, "optional"), (2, "pointer"), (4, "allocatable"),
+                          (8, "target"), (16, "value"), (32, "save"),
+                          (64, "by_ref"), (128, "const")):
+            if decl.get(key):
+                flags |= flag
+        return flags
+
+    # Every declared holder, so the explorer can list struct-typed variables
+    # even when they are never accessed.
+    module_file = {name: (mod or {}).get("file") for name, mod in sym.modules.items()}
+    for module, variables in sym.module_vars.items():
+        for name, decl in variables.items():
+            cur.execute("INSERT OR REPLACE INTO variables VALUES (?,?,?,?,?,?,?,?,?,?)", (
+                f"var:{module}::{name}", "var", name, module, module,
+                decl.get("type"), decl.get("rank") or 0, decl.get("line"),
+                module_file.get(module) or decl.get("file"), _flags(decl)))
+    for pid, proc in sym.procs.items():
+        for p in proc.get("params") or []:
+            cur.execute("INSERT OR REPLACE INTO variables VALUES (?,?,?,?,?,?,?,?,?,?)", (
+                f"param:{pid}::{p.get('name')}", "param", p.get("name"), pid,
+                proc.get("module"), p.get("type"), p.get("rank") or 0,
+                p.get("line"), proc.get("file"), _flags(p)))
+        for decl in proc.get("decls") or []:
+            cur.execute("INSERT OR REPLACE INTO variables VALUES (?,?,?,?,?,?,?,?,?,?)", (
+                f"local:{pid}::{decl.get('name')}", "local", decl.get("name"), pid,
+                proc.get("module"), decl.get("type"), decl.get("rank") or 0,
+                decl.get("line"), proc.get("file"), _flags(decl)))
     for pid, accs in interproc.accesses.items():
         for a in accs:
             cur.execute("INSERT INTO accesses VALUES (?,?,?,?,?,?,?)", (

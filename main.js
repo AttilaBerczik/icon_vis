@@ -33,6 +33,10 @@ let currentTraceLabel = null;
 let roleFilterMask = 15;
 let includePasses = true;
 let searchMode = "functions";
+// Previous trace restored when an on-demand struct highlight is cleared.
+let structHighlightRestore = null;
+let currentStructTouch = null;
+let currentStructLabel = null;
 
 // Used by panel.js to avoid adding a call-graph selection highlight on top of
 // an active data trace.
@@ -48,7 +52,7 @@ window.isParameterViewActive = () => {
     const manager = window.detailPanelManager;
     if (manager && Array.isArray(manager.tabs)) {
         const active = manager.tabs.find(t => t.id === manager.activeTabId);
-        if (active && active.type === "lifecycle") return true;
+        if (active && (active.type === "lifecycle" || active.type === "struct")) return true;
     }
     return false;
 };
@@ -137,6 +141,8 @@ function normalizeLayout(json) {
 }
 
 function initViewer(precomputedLayout) {
+    window.graphMetaForStruct = graphMeta;
+    window.parsedGraphForStruct = parsedGraph;
     const view = buildViewData(parsedGraph, showExternalStubs);
     const originalNodes = view.nodes;
     const originalEdges = view.edges;
@@ -578,6 +584,16 @@ if (ctxShowParams) {
     });
 }
 
+const ctxShowData = document.getElementById("ctx-show-data");
+if (ctxShowData) {
+    ctxShowData.addEventListener("click", () => {
+        if (contextMenuNodeId !== null && contextMenuNodeId !== undefined) {
+            openFunctionData(contextMenuNodeId);
+        }
+        closeContextMenu();
+    });
+}
+
 document.getElementById("ctx-hide-file").addEventListener("click", () => {
     closeContextMenu();
     if (contextMenuTarget && contextMenuTarget.fileKey) toggleHiddenFile(contextMenuTarget.fileKey);
@@ -745,6 +761,25 @@ function setupSearchUI(visContainerNode) {
         dataSearchSelection = -1;
     }
 
+    function dataResultLabel(item) {
+        if (item.kind === "struct") return item.name;
+        if (item.kind === "field") {
+            const member = item.member || item.name;
+            const parts = member.split("%");
+            return parts.length > 1 ? `${parts[0]} › ${parts.slice(1).join("%")}` : member;
+        }
+        const type = item.type ? ` : ${item.type}` : "";
+        return `${item.name}${type}`;
+    }
+
+    function dataResultSub(item) {
+        if (item.kind === "field") return item.type ? `member of ${item.type}` : "member";
+        if (item.kind === "struct") return "type";
+        if (item.kind === "param") return "parameter";
+        if (item.kind === "local") return "local";
+        return "variable";
+    }
+
     function renderDataDropdown(results) {
         if (!dropdown) return;
         dataSearchResults = results || [];
@@ -759,15 +794,29 @@ function setupSearchUI(visContainerNode) {
             positionDataDropdown();
             return;
         }
-        const groups = { field: "Field", param: "Parameter", var: "Module variable", other: "Other" };
+        const groups = {
+            struct: "Types",
+            field: "Members",
+            vars: "Variables",
+            other: "Other"
+        };
+        const order = ["struct", "field", "vars", "other"];
+        const category = (item) => {
+            if (item.kind === "struct") return "struct";
+            if (item.kind === "field") return "field";
+            if (item.kind === "param" || item.kind === "var" || item.kind === "local") return "vars";
+            return "other";
+        };
         const grouped = new Map();
         for (const item of dataSearchResults) {
-            const key = item.kind || "other";
+            const key = category(item);
             if (!grouped.has(key)) grouped.set(key, []);
             grouped.get(key).push(item);
         }
-        let idx = 0;
-        for (const [kind, items] of grouped) {
+        const ordered = [];
+        for (const kind of order) {
+            const items = grouped.get(kind);
+            if (!items || !items.length) continue;
             const head = document.createElement("div");
             head.className = "data-search-group";
             head.textContent = groups[kind] || kind;
@@ -775,25 +824,35 @@ function setupSearchUI(visContainerNode) {
             for (const item of items) {
                 const row = document.createElement("div");
                 row.className = "data-search-item";
-                row.dataset.index = String(idx);
+                row.dataset.index = String(ordered.length);
                 const name = document.createElement("span");
                 name.className = "data-search-name";
-                name.textContent = item.name;
+                name.textContent = dataResultLabel(item);
+                const sub = document.createElement("span");
+                sub.className = "data-search-kind";
+                sub.textContent = dataResultSub(item);
                 const counts = document.createElement("span");
                 counts.className = "data-search-counts";
-                counts.innerHTML = `<span class="count-item" title="writes">`
-                    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
-                    + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
-                    + `<path d="M12 20h9"></path>`
-                    + `<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"></path>`
-                    + `</svg>${item.writes}</span>`
-                    + `<span class="count-item" title="reads">`
-                    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
-                    + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
-                    + `<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"></path>`
-                    + `<circle cx="12" cy="12" r="3"></circle>`
-                    + `</svg>${item.reads}</span>`;
+                if (item.kind === "struct" || item.fns) {
+                    counts.innerHTML = `<span class="count-item" title="functions">${item.fns || 0} fn</span>`;
+                } else if (((item.reads || 0) + (item.writes || 0)) === 0) {
+                    counts.textContent = "unused";
+                } else {
+                    counts.innerHTML = `<span class="count-item" title="writes">`
+                        + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+                        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+                        + `<path d="M12 20h9"></path>`
+                        + `<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"></path>`
+                        + `</svg>${item.writes}</span>`
+                        + `<span class="count-item" title="reads">`
+                        + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+                        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+                        + `<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"></path>`
+                        + `<circle cx="12" cy="12" r="3"></circle>`
+                        + `</svg>${item.reads}</span>`;
+                }
                 row.appendChild(name);
+                row.appendChild(sub);
                 row.appendChild(counts);
                 row.addEventListener("mouseenter", () => markDataSelection(Number(row.dataset.index)));
                 row.addEventListener("click", (e) => {
@@ -801,9 +860,10 @@ function setupSearchUI(visContainerNode) {
                     chooseDataResult(item);
                 });
                 dropdown.appendChild(row);
-                idx += 1;
+                ordered.push(item);
             }
         }
+        dataSearchResults = ordered;
         dropdown.style.display = "block";
         positionDataDropdown();
         markDataSelection(0);
@@ -823,7 +883,17 @@ function setupSearchUI(visContainerNode) {
         countBadge.style.display = "inline-flex";
         countBadge.className = "search-match-count has-matches";
         countBadge.textContent = item.kind;
-        startTrace(item.groupId, "full", null, item.name);
+        if (item.kind === "struct") {
+            openStructType(item.groupId);
+        } else if (item.kind === "field") {
+            openStructMember({
+                member: item.member || item.name,
+                type: item.type,
+                groupId: item.groupId
+            });
+        } else {
+            openStructVariable(item);
+        }
     }
 
     function runDataSearch(query) {
@@ -1028,6 +1098,183 @@ function closeParamCard() {
 }
 window.closeParamCard = closeParamCard;
 
+// ---------------------------------------------------------------------------
+// Struct explorer entry points (search, parameter cards, lifecycle rows)
+// ---------------------------------------------------------------------------
+
+const STRUCT_INTRINSIC_TYPES = new Set([
+    "integer", "real", "logical", "character", "complex", "double",
+    "doubleprecision", "byte", "int", "long", "short", "float", "bool",
+    "void", "c_ptr", "c_funptr", "c_int", "c_double", "c_float", "c_char",
+    "c_bool", "c_size_t", "c_int64_t", "c_int32_t", "c_loc"
+]);
+
+function structBaseType(type) {
+    let text = String(type || "").trim();
+    if (!text) return "";
+    const low = text.toLowerCase();
+    if (low.startsWith("type(") || low.startsWith("class(")) {
+        text = text.slice(text.indexOf("(") + 1);
+        if (text.endsWith(")")) text = text.slice(0, -1);
+    }
+    text = text.split("(")[0].trim();
+    return text.split("::").pop().toLowerCase();
+}
+
+function openStructType(typeKey) {
+    const manager = window.detailPanelManager;
+    if (!manager) return;
+    const key = structBaseType(typeKey);
+    if (!key) return;
+    manager.openStruct({ kind: "type", typeKey: key });
+}
+
+function openStructMember(item) {
+    const manager = window.detailPanelManager;
+    if (!manager || !item || !item.member) return;
+    const member = item.member.toLowerCase();
+    manager.openStruct({
+        kind: "member",
+        member,
+        typeKey: member.split("%")[0],
+        route: item.route || null,
+        gid: item.groupId || null,
+        routeMode: item.route ? "route" : "all"
+    });
+}
+
+function openStructVariable(item) {
+    const manager = window.detailPanelManager;
+    if (!manager || !item) return;
+    const typeKey = structBaseType(item.type);
+    if (!dataflowClient) {
+        manager.openStruct({ kind: "variable", entity: null, name: item.name,
+            typeKey, gid: item.groupId });
+        return;
+    }
+    dataflowClient.getStructs().then((structs) => {
+        const rec = structs && structs.types ? structs.types[typeKey] : null;
+        if (rec && !rec.value) {
+            manager.openStruct({ kind: "type", typeKey, holderId: null });
+        } else {
+            manager.openStruct({ kind: "variable", entity: null, name: item.name,
+                typeKey, gid: item.groupId });
+        }
+    }).catch(() => {
+        manager.openStruct({ kind: "variable", entity: null, name: item.name,
+            typeKey, gid: item.groupId });
+    });
+}
+
+function openStructParam(fnId, paramName, typeName, fnName) {
+    const manager = window.detailPanelManager;
+    if (!manager) return;
+    const typeKey = structBaseType(typeName);
+    if (!typeKey || STRUCT_INTRINSIC_TYPES.has(typeKey)) return;
+    const fnNode = parsedGraph && parsedGraph.meta && parsedGraph.meta.functionToNode
+        ? parsedGraph.meta.functionToNode.get(fnId)
+        : null;
+    manager.openStruct({ kind: "type", typeKey }, {
+        fnNode: fnNode ?? null,
+        fnName: fnName || paramName
+    });
+}
+window.openStructParam = openStructParam;
+window.openStructType = openStructType;
+window.openStructMember = openStructMember;
+
+function findStructMemberForRoute(structs, route) {
+    if (!structs || !structs.types || !route) return null;
+    for (const [typeKey, rec] of Object.entries(structs.types)) {
+        for (const [member, routes] of Object.entries(rec.routes || {})) {
+            if ((routes || []).some((r) => r[0] === route)) {
+                return { typeKey, member, route };
+            }
+        }
+    }
+    return null;
+}
+
+function openStructEntity(entity) {
+    const text = String(entity || "");
+    if (!text) return;
+    const kind = text.split(":", 1)[0];
+    if (kind === "field") {
+        const route = text.slice(text.indexOf(":") + 1);
+        if (!dataflowClient) return;
+        dataflowClient.getStructs().then(async (structs) => {
+            const hit = findStructMemberForRoute(structs, route);
+            if (hit) {
+                openStructMember(hit);
+                return;
+            }
+            // Unresolved paths keep their raw spelling; find their lifecycle
+            // group through the search index so the row is still usable.
+            let gid = null;
+            try {
+                const results = await dataflowClient.search(route, 80);
+                const match = (results || []).find((r) => r.kind === "field"
+                    && (r.member === route || r.name === route));
+                if (match) gid = match.groupId;
+            } catch (err) { /* optional */ }
+            window.detailPanelManager?.openStruct({
+                kind: "member", member: route, typeKey: route.split("%")[0],
+                gid, route: null, routeMode: "all"
+            });
+        }).catch(() => {});
+        return;
+    }
+    if (kind === "param" || kind === "var" || kind === "local") {
+        if (!dataflowClient) return;
+        dataflowClient.getStructs().then((structs) => {
+            if (!structs || !structs.types) return;
+            const short = text.split("::").pop();
+            // Exact entity id wins across the whole model. A name-only match
+            // (e.g. `this` or `pt`) must never shadow the real holder of a
+            // variable in a later type.
+            let nameMatch = null;
+            for (const [typeKey, rec] of Object.entries(structs.types)) {
+                const holders = rec.holders || [];
+                const exact = holders.find((h) => h.id === text);
+                if (exact) {
+                    window.detailPanelManager?.openStruct({
+                        kind: "variable", entity: text, name: exact.name,
+                        typeKey, gid: null, holderId: exact.id
+                    });
+                    return;
+                }
+                if (!nameMatch) {
+                    const byName = holders.find((h) => h.name === short);
+                    if (byName) nameMatch = { typeKey, holder: byName };
+                }
+            }
+            if (nameMatch) {
+                window.detailPanelManager?.openStruct({
+                    kind: "variable", entity: text, name: nameMatch.holder.name,
+                    typeKey: nameMatch.typeKey, gid: null,
+                    holderId: nameMatch.holder.id
+                });
+            }
+            const member = findStructMemberForRoute(structs, text);
+            if (member) openStructMember(member);
+        }).catch(() => {});
+    }
+}
+window.openStructEntity = openStructEntity;
+
+function openFunctionData(nodeId) {
+    const manager = window.detailPanelManager;
+    const rec = recordForNode(nodeId);
+    if (!manager || !rec) return;
+    manager.openStruct({
+        kind: "function",
+        fnNode: nodeId,
+        fnId: rec.functionId,
+        name: rec.name || String(nodeId)
+    });
+}
+window.openFunctionData = openFunctionData;
+
 // Used by the side panel to close a card that belongs to a tab being closed.
 window.isParamCardAnchoredTo = (container) => {
     if (!paramCardSourceContainer || !container) return false;
@@ -1219,6 +1466,25 @@ function renderParamCard(rec, data, error) {
         type.textContent = `: ${param.t || "?"}${rank}`;
         row.appendChild(type);
 
+        const structType = structBaseType(param.t);
+        if (structType && !STRUCT_INTRINSIC_TYPES.has(structType)) {
+            const structBtn = document.createElement("button");
+            structBtn.type = "button";
+            structBtn.className = "param-struct";
+            structBtn.title = `Browse ${structType} and what this function uses`;
+            structBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" `
+                + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+                + `<rect x="3" y="3" width="7" height="7" rx="1"></rect>`
+                + `<rect x="14" y="3" width="7" height="7" rx="1"></rect>`
+                + `<rect x="3" y="14" width="7" height="7" rx="1"></rect>`
+                + `<rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>`;
+            structBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openStructParam(data.id, param.n, param.t, data.name);
+            });
+            row.appendChild(structBtn);
+        }
+
         if (intentMismatch(param)) {
             const warn = document.createElement("span");
             warn.className = "param-warn";
@@ -1401,6 +1667,9 @@ function startTrace(groupId, mode, paramEntity, label) {
         if (effectiveMode === "backward" && !traceHasBackwardPath(trace, paramEntity)) {
             effectiveMode = "full";
         }
+        structHighlightRestore = null;
+        currentStructTouch = null;
+        currentStructLabel = null;
         currentTrace = trace;
         currentTraceMode = effectiveMode;
         currentParamEntity = paramEntity || null;
@@ -1421,7 +1690,12 @@ function startTrace(groupId, mode, paramEntity, label) {
 
 function rebuildCurrentTraceView() {
     if (!currentTrace) return;
-    let view = buildDataTraceView(currentTrace, currentTraceMode, currentParamEntity);
+    let view;
+    if (currentTraceMode === "struct") {
+        view = buildStructTouchView(currentStructTouch || {}, currentStructLabel || "struct");
+    } else {
+        view = buildDataTraceView(currentTrace, currentTraceMode, currentParamEntity);
+    }
     if (!includePasses || roleFilterMask !== 15) {
         const nodeIds = new Set();
         const roles = new Map();
@@ -1442,7 +1716,15 @@ function rebuildCurrentTraceView() {
             const [a, b] = key.split("|").map(Number);
             if (nodeIds.has(a) && nodeIds.has(b)) edges.add(key);
         }
-        view = { ...view, nodeIds, roles, edges };
+        const counts = { create: 0, write: 0, read: 0, pass: 0,
+            functions: nodeIds.size, events: view.counts ? view.counts.events : 0 };
+        for (const mask of roles.values()) {
+            if (mask & 1) counts.create += 1;
+            if (mask & 2) counts.write += 1;
+            if (mask & 4) counts.read += 1;
+            if (mask & 8) counts.pass += 1;
+        }
+        view = { ...view, nodeIds, roles, edges, counts };
     }
     currentTraceView = view;
     applyTraceView(view);
@@ -1459,11 +1741,32 @@ function applyTraceView(view) {
 }
 
 function clearTrace() {
+    // Clearing an on-demand struct highlight restores the trace that was
+    // visible before it was opened (plan §5 "Show on graph").
+    if (structHighlightRestore) {
+        const restore = structHighlightRestore;
+        structHighlightRestore = null;
+        currentStructTouch = null;
+        currentStructLabel = null;
+        if (restore.trace) {
+            currentTrace = restore.trace;
+            currentTraceView = restore.view;
+            currentTraceMode = restore.mode;
+            currentParamEntity = restore.paramEntity;
+            currentTraceGroupId = restore.groupId;
+            currentTraceLabel = restore.label;
+            applyTraceView(restore.view);
+            showTraceBar(restore.view);
+            return;
+        }
+    }
     currentTrace = null;
     currentTraceView = null;
     currentParamEntity = null;
     currentTraceGroupId = null;
     currentTraceLabel = null;
+    currentStructTouch = null;
+    currentStructLabel = null;
     const container = d3.select("#visualization").node();
     if (container && typeof container.clearDataTrace === "function") container.clearDataTrace();
     const bar = document.getElementById("trace-bar");
@@ -1472,13 +1775,102 @@ function clearTrace() {
     if (legend) legend.style.display = "none";
 }
 
+function buildStructTouchView(touch, label) {
+    const fn = touch.fn || [];
+    const nodeIds = new Set();
+    const roles = new Map();
+    let create = 0, write = 0, read = 0, pass = 0;
+    for (const entry of fn) {
+        const node = entry[0];
+        const mask = entry[1] || 0;
+        nodeIds.add(node);
+        roles.set(node, mask);
+        if (mask & 1) create += 1;
+        if (mask & 2) write += 1;
+        if (mask & 4) read += 1;
+        if (mask & 8) pass += 1;
+    }
+    const edges = new Set((touch.edges || []).map(([a, b]) => `${a}|${b}`));
+    const origin = touch.origin || [];
+    const originFn = origin[0] !== undefined ? origin[0] : (nodeIds.size ? [...nodeIds][0] : null);
+    return {
+        trace: null,
+        mode: "struct",
+        paramEntity: null,
+        nodeIds,
+        roles,
+        edges,
+        steps: new Map(),
+        nodeEvents: new Map(),
+        originFn,
+        originFile: origin[2] || "",
+        originName: origin[3] || "",
+        originLine: origin[1] || 0,
+        originCreated: !!(roles.get(originFn) & 1),
+        counts: {
+            create, write, read, pass,
+            functions: nodeIds.size, events: 0
+        },
+        folderCounts: new Map(touch.folders || []),
+        fileCounts: new Map(touch.files || []),
+        large: nodeIds.size > 500,
+        entity: label,
+        kind: "struct"
+    };
+}
+
+function showStructOnGraph(typeKey, member, label) {
+    if (!dataflowClient || !typeKey) return;
+    dataflowClient.getStructTouch(typeKey).then((touch) => {
+        if (!touch) {
+            showToast("No touch set recorded for this type.");
+            return;
+        }
+        const data = member && touch.members && touch.members[member]
+            ? touch.members[member]
+            : touch;
+        const text = label || (member ? member.split("%").pop() : typeKey);
+        const view = buildStructTouchView(data, text);
+        if (!structHighlightRestore) {
+            structHighlightRestore = {
+                trace: currentTrace, view: currentTraceView, mode: currentTraceMode,
+                paramEntity: currentParamEntity, groupId: currentTraceGroupId,
+                label: currentTraceLabel
+            };
+        }
+        currentTrace = {
+            id: `struct:${typeKey}:${member || ""}`,
+            entity: member ? `field:${member}` : `struct:${typeKey}`,
+            kind: "struct", events: [], backward: {}, routes: [],
+            origin: { node: view.originFn, line: view.originLine,
+                file: view.originFile, name: view.originName }
+        };
+        currentTraceMode = "struct";
+        currentParamEntity = null;
+        currentTraceGroupId = null;
+        currentTraceLabel = text;
+        currentStructTouch = data;
+        currentStructLabel = text;
+        currentTraceView = view;
+        applyTraceView(view);
+        showTraceBar(view);
+    }).catch(() => showToast("Could not load the struct touch set."));
+}
+window.showStructOnGraph = showStructOnGraph;
+
 function showTraceBar(view) {
     const bar = document.getElementById("trace-bar");
     if (!bar) return;
     bar.style.display = "flex";
     bar.classList.toggle("trace-bar-large", view.large);
     const title = document.getElementById("trace-entity");
-    if (title) title.textContent = currentTraceLabel || view.entity || "trace";
+    if (title) {
+        title.textContent = currentTraceLabel || view.entity || "trace";
+        const linkable = !!(currentTrace && currentTrace.entity &&
+            /^(field|param|var|local):/.test(currentTrace.entity));
+        title.classList.toggle("struct-link", linkable);
+        title.title = linkable ? "Open in the struct explorer" : "";
+    }
     const counts = document.getElementById("trace-counts");
     if (counts) {
         const c = view.counts || {};
@@ -1517,7 +1909,7 @@ function shortPath(path) {
 const traceModeBackward = document.getElementById("trace-mode-backward");
 if (traceModeBackward) {
     traceModeBackward.addEventListener("click", () => {
-        if (!currentTrace || !currentParamEntity) return;
+        if (!currentTrace || !currentParamEntity || currentTraceMode === "struct") return;
         currentTraceMode = "backward";
         rebuildCurrentTraceView();
     });
@@ -1525,12 +1917,22 @@ if (traceModeBackward) {
 const traceModeFull = document.getElementById("trace-mode-full");
 if (traceModeFull) {
     traceModeFull.addEventListener("click", () => {
+        if (currentTraceMode === "struct") return;
         currentTraceMode = "full";
         rebuildCurrentTraceView();
     });
 }
 const traceClose = document.getElementById("trace-close");
 if (traceClose) traceClose.addEventListener("click", clearTrace);
+const traceEntityEl = document.getElementById("trace-entity");
+if (traceEntityEl) {
+    traceEntityEl.addEventListener("click", () => {
+        if (currentTrace && currentTrace.entity &&
+            typeof window.openStructEntity === "function") {
+            window.openStructEntity(currentTrace.entity);
+        }
+    });
+}
 const traceJump = document.getElementById("trace-jump-origin");
 if (traceJump) {
     traceJump.addEventListener("click", () => {

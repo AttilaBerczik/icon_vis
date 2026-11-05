@@ -124,16 +124,25 @@ def make_decl(
 
 
 def _rank(spec: str) -> int:
+    """Rank of an array spec, with or without the enclosing parentheses.
+
+    ``DIMENSION(:,:,:)`` is parsed as the attribute *content* ``:,:,:`` by
+    ``attr_of``, so requiring a leading ``(`` would report rank 0 for every
+    ``DIMENSION`` declaration.
+    """
+    s = (spec or "").strip()
+    if not s:
+        return 0
     depth = 0
     commas = 0
-    for ch in spec:
-        if ch == "(":
+    for ch in s:
+        if ch in "([":
             depth += 1
-        elif ch == ")":
-            depth -= 1
-        elif ch == "," and depth == 1:
+        elif ch in ")]":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth <= 1:
             commas += 1
-    return commas + 1 if spec.strip().startswith("(") else 0
+    return commas + 1
 
 
 def path_root(path: str) -> str:
@@ -211,6 +220,14 @@ def scan_paths(text: str) -> list[str]:
     i = 0
     n = len(text or "")
     while i < n:
+        if text[i] in ('"', "'"):
+            # Quoted literals are data, not expressions.
+            quote = text[i]
+            i += 1
+            while i < n and text[i] != quote:
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
         if text[i].isalpha() or text[i] == "_":
             path, end, inner = _read_path(text, i)
             if path and path not in out:

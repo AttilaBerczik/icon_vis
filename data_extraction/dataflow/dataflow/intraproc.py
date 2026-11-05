@@ -7,19 +7,6 @@ from collections import defaultdict
 from .paths import PathResolver
 from .symtab import SymbolTable
 
-_KEYWORDS = {
-    "if", "then", "else", "elseif", "endif", "do", "enddo", "while", "select",
-    "case", "where", "forall", "call", "not", "and", "or", "eqv", "neqv",
-    "true", "false", "null", "kind", "len", "dim", "allocated", "associated",
-    "present", "size", "lbound", "ubound", "shape", "real", "integer",
-    "logical", "character", "complex", "type", "class", "module", "contains",
-    "use", "only", "intent", "in", "out", "inout", "optional", "value",
-    "pointer", "target", "allocatable", "parameter", "save", "public",
-    "private", "pure", "elemental", "recursive", "impure", "result", "bind",
-    "import", "procedure", "generic", "abstract", "extends", "deferred",
-}
-
-
 def _access(proc: dict, rp, mode: str, line: int, via: str) -> dict:
     return {
         "entity": rp.entity,
@@ -79,7 +66,11 @@ def analyse_proc(sym: SymbolTable, proc: dict) -> list[dict]:
     def add(paths, mode, line, via):
         for p in paths or []:
             root = p.split("%", 1)[0]
-            if not p or root in _KEYWORDS or root not in known:
+            # `known` already contains every declared name. A declared
+            # variable may legitimately be called `value`, `size`, `len` or
+            # `result`; filtering those as keywords silently dropped their
+            # data flow.
+            if not p or root not in known:
                 continue
             rp = resolver.resolve(p, proc["id"])
             if rp.root_kind == "unknown":

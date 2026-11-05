@@ -10,6 +10,7 @@ from ..facts import (
     empty_facts,
     make_decl,
     normalize_path,
+    parse_fortran_attrs,
     scan_paths,
     type_name,
 )
@@ -148,9 +149,11 @@ def _declaration(node) -> list[dict]:
         if cname in ("Intrinsic_Type_Spec", "Declaration_Type_Spec", "Derived_Type_Spec"):
             spec = _text(child)
         elif cname in _ATTR_LIST_TYPES:
-            attrs = [x.strip() for x in _text(child).split(",") if x.strip()]
+            # `DIMENSION(:,:,:)` contains commas that are not attribute
+            # separators; split only at the top level.
+            attrs = parse_fortran_attrs(_text(child))
         elif cname == "Attr_Spec":
-            attrs.append(_text(child))
+            attrs.extend(parse_fortran_attrs(_text(child)))
         elif cname in ("Entity_Decl_List", "Component_Decl_List"):
             entities = [c for c in getattr(child, "children", []) or [] if c is not None]
         elif cname in ("Entity_Decl", "Component_Decl"):

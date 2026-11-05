@@ -166,12 +166,24 @@ class FortranPipelineTests(unittest.TestCase):
         self.assertTrue(any(a["entity"] == "field:t_state%field" and a["mode"] == "read"
                             for a in reader))
 
+    def test_keyword_named_parameter_is_not_dropped(self):
+        reader = self.inter.accesses["fixture_mod::reader"]
+        self.assertTrue(any(a["entity"] == "param:fixture_mod::reader::value"
+                            and a["mode"] == "write" for a in reader))
+
     def test_interprocedural_mapping(self):
         caller = self.inter.accesses["fixture_mod::caller"]
         modes = {a["mode"] for a in caller if a["entity"] == "field:t_state%field"}
         self.assertIn("write", modes)
         self.assertIn("read", modes)
         self.assertTrue(any(p["caller"] == "fixture_mod::caller" for p in self.inter.passes))
+
+    def test_dimension_attribute_keeps_rank(self):
+        proc = next(p for p in self.facts["procedures"] if p["name"] == "caller")
+        grid = next(d for d in proc["decls"] if d["name"] == "grid")
+        self.assertEqual(grid["rank"], 3)
+        self.assertTrue(grid["allocatable"])
+        self.assertIn("DIMENSION(:,:,:)", grid["attrs"])
 
     def test_calls_and_exec_space(self):
         self.assertIn("fixture_mod::writer", [c.callee for c in self.link.calls["fixture_mod::caller"]])
@@ -211,6 +223,35 @@ class CppPipelineTests(unittest.TestCase):
         self.assertTrue(any(a["mode"] == "write" for a in self.direct[write]))
         kernel = next(pid for pid, p in self.sym.procs.items() if p["name"] == "kernel")
         self.assertTrue(any(a["entity"] == "field:state%field" for a in self.direct[kernel]))
+
+    def test_multiple_field_declarators_are_all_kept(self):
+        self.assertIn("multi", self.sym.types)
+        fields = {f["name"]: f for f in self.sym.types["multi"][0]["fields"]}
+        self.assertEqual(set(fields), {"a", "b", "c", "d", "cb"})
+        self.assertEqual(fields["d"]["rank"], 1)
+        self.assertEqual(fields["cb"]["type"], "function")
+
+    def test_out_of_line_method_keeps_class_scope(self):
+        init = next(pid for pid, p in self.sym.procs.items()
+                    if p["name"] == "init" and "box" in pid)
+        proc = self.sym.procs[init]
+        self.assertEqual(proc.get("class"), "box")
+        entities = {(a["entity"], a["mode"]) for a in self.direct[init]}
+        self.assertIn(("field:box%value", "write"), entities)
+        self.assertIn(("field:box%n", "write"), entities)
+
+    def test_constructor_call_is_not_a_model_call(self):
+        make_box = next(pid for pid, p in self.sym.procs.items() if p["name"] == "make_box")
+        self.assertTrue(any(a["path"] == "b" for a in self.direct[make_box]))
+        calls = linker.link(self.sym).calls.get(make_box, [])
+        self.assertFalse(any(c.callee.startswith("ext:external:box") for c in calls))
+
+    def test_call_style_view_access_is_not_an_external_call(self):
+        read_view = next(pid for pid, p in self.sym.procs.items() if p["name"] == "read_view")
+        self.assertTrue(any(a["path"] == "v" and a["mode"] == "read"
+                            for a in self.direct[read_view]))
+        calls = linker.link(self.sym).calls.get(read_view, [])
+        self.assertFalse(any(c.callee.startswith("ext:external:v") for c in calls))
 
 
 if __name__ == "__main__":

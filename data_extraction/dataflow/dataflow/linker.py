@@ -182,10 +182,13 @@ def _resolve_cpp_call(sym: SymbolTable, proc: dict, callee: str, receiver: str |
     if receiver:
         root = receiver.split("%")[0]
         if root in ("this", "self"):
-            # Class scope is the second-to-last component of the qualified id.
-            q = proc.get("qualified") or ""
-            parts = q.split("::")
-            type_name = parts[-2].lower() if len(parts) > 1 else ""
+            # Class scope is explicit after SymbolTable classifies out-of-line
+            # definitions; fall back to the qualified id for old facts.
+            type_name = (proc.get("class") or "").lower()
+            if not type_name:
+                q = proc.get("qualified") or ""
+                parts = q.split("::")
+                type_name = parts[-2].lower() if len(parts) > 1 else ""
         else:
             d = decls.get(root)
             type_name = (d or {}).get("type", "").split("::")[-1].lower()

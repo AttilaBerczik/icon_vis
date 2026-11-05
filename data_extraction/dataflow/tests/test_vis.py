@@ -19,6 +19,9 @@ TYPES = vis.TypesView([
     {"name": "t_prog", "fields": [
         {"name": "rho", "type": "real(kind=wp)"},
         {"name": "vn", "type": "real(kind=wp)"},
+        {"name": "w", "type": "real(kind=wp)"},
+        {"name": "exner", "type": "real(kind=wp)"},
+        {"name": "theta_v", "type": "real(kind=wp)"},
     ]},
     {"name": "t_nh_state", "fields": [
         {"name": "prog", "type": "t_prog"},
@@ -32,6 +35,10 @@ TYPES = vis.TypesView([
     ]},
     {"name": "t_patch_cells", "fields": [
         {"name": "start_index", "type": "integer"},
+        {"name": "end_index", "type": "integer"},
+        {"name": "start_block", "type": "integer"},
+        {"name": "end_block", "type": "integer"},
+        {"name": "owned", "type": "logical", "pointer": True},
     ]},
 ])
 
@@ -267,6 +274,273 @@ class TraceGroupTests(unittest.TestCase):
         names = {row[0] for row in self.trace.search}
         self.assertIn("t_prog%rho", names)
         self.assertIn("rho", names)
+
+
+
+
+STRUCT_TYPES = vis.TypesView([
+    {"name": "t_coord", "module": "m_geom", "file": "/m/src/geom.f90", "line": 10,
+     "fields": [
+         {"name": "x", "type": "real(kind=wp)"},
+         {"name": "y", "type": "real(kind=wp)"},
+     ]},
+    {"name": "t_cell", "module": "m_geom", "file": "/m/src/geom.f90", "line": 30,
+     "fields": [
+         {"name": "center", "type": "t_coord", "rank": 0},
+         {"name": "area", "type": "real(kind=wp)", "rank": 2},
+         {"name": "idx", "type": "integer", "rank": 1, "allocatable": True},
+         {"name": "flags", "type": "logical", "rank": 0},
+         {"name": "tag", "type": "integer", "rank": 0},
+     ]},
+    {"name": "t_holder", "module": "m_geom", "file": "/m/src/geom.f90", "line": 50,
+     "fields": [
+         {"name": "target", "type": "t_cell", "rank": 0, "pointer": True},
+         {"name": "next", "type": "t_holder", "rank": 0, "pointer": True},
+         {"name": "count", "type": "integer", "rank": 0},
+     ]},
+    {"name": "t_base", "module": "m_geom", "file": "/m/src/geom.f90", "line": 70,
+     "fields": [
+         {"name": "base_val", "type": "real(kind=wp)"},
+         {"name": "shared", "type": "t_cell"},
+         {"name": "a", "type": "integer"}, {"name": "b", "type": "integer"},
+         {"name": "c", "type": "integer"},
+     ]},
+    {"name": "t_child", "module": "m_geom", "file": "/m/src/geom.f90", "line": 90,
+     "extends": "t_base", "fields": [
+         {"name": "child_val", "type": "real(kind=wp)"},
+     ]},
+    {"name": "t_patch", "module": "m_geom", "file": "/m/src/geom.f90", "line": 110,
+     "fields": [
+         {"name": "cells", "type": "t_cell", "rank": 2},
+         {"name": "holder", "type": "t_holder", "rank": 0},
+     ]},
+])
+
+
+def make_struct_source() -> dict:
+    functions = {
+        "program::main": {
+            "id": "program::main", "name": "main", "module": None,
+            "kind": "program", "lang": "fortran", "file": "/m/src/main.f90",
+            "line": 1, "end_line": 30, "params": [], "result": None,
+            "exec_space": "host", "aliases": [],
+        },
+        "m_use::work": {
+            "id": "m_use::work", "name": "work", "module": "m_use",
+            "kind": "subroutine", "lang": "fortran", "file": "/m/src/use.f90",
+            "line": 10, "end_line": 30,
+            "params": [
+                {"name": "p_patch", "type": "t_patch", "rank": 0,
+                 "intent": "inout", "inferred_intent": "inout"},
+                {"name": "cell", "type": "t_cell", "rank": 0,
+                 "intent": "inout", "inferred_intent": "inout"},
+            ],
+            "result": None, "exec_space": "host", "aliases": [],
+        },
+    }
+    calls = [{"caller": "program::main", "callee": "m_use::work", "line": 5,
+              "weight": 1, "kind": "call", "virtual": False}]
+    accesses = [
+        {"proc": "m_use::work", "entity": "field:t_patch%cells%center%x",
+         "mode": "read", "line": 12, "via": "expr", "root": "p_patch",
+         "root_kind": "param", "scope": "m_use", "type": "t_patch"},
+        {"proc": "m_use::work", "entity": "field:t_cell%center%y",
+         "mode": "read", "line": 13, "via": "expr", "root": "cell",
+         "root_kind": "param", "scope": "m_use", "type": "t_cell"},
+        {"proc": "m_use::work", "entity": "field:t_patch%holder%target%area",
+         "mode": "write", "line": 14, "via": "assign", "root": "p_patch",
+         "root_kind": "param", "scope": "m_use", "type": "t_patch"},
+        {"proc": "m_use::work", "entity": "field:t_child%base_val",
+         "mode": "read", "line": 16, "via": "expr", "root": "c",
+         "root_kind": "local", "scope": "m_use", "type": "t_child"},
+        {"proc": "m_use::work", "entity": "field:t_nowhere%leaf",
+         "mode": "read", "line": 18, "via": "expr", "root": "u",
+         "root_kind": "local", "scope": "m_use", "type": None},
+        {"proc": "m_use::work", "entity": "field:t_nowhere%leaf%deeper",
+         "mode": "read", "line": 19, "via": "expr", "root": "u",
+         "root_kind": "local", "scope": "m_use", "type": None},
+        {"proc": "m_use::work", "entity": "param:m_use::work::cell",
+         "mode": "write", "line": 20, "via": "assign", "root": "cell",
+         "root_kind": "param", "scope": "m_use", "type": "t_cell"},
+    ]
+    passes = [
+        # Struct formal + field actual: must NOT be merged into the member.
+        {"caller": "program::main", "callee": "m_use::work", "line": 5,
+         "formal": "param:m_use::work::p_patch",
+         "actual": "field:t_patch%cells%area", "mode": "read"},
+        # Struct formal + same-type holder actual: same type, may merge.
+        {"caller": "program::main", "callee": "m_use::work", "line": 5,
+         "formal": "param:m_use::work::cell",
+         "actual": "var:m_geom::cell_module", "mode": "write"},
+    ]
+    variables = [
+        {"id": "var:m_geom::cell_module", "kind": "var",
+         "name": "cell_module", "scope": "m_geom", "module": "m_geom",
+         "type": "t_cell", "rank": 0, "line": 3, "file": "/m/src/geom.f90",
+         "flags": 0},
+    ]
+    file_meta = {
+        "/m/src/main.f90": {"rel_path": "src/main.f90", "component": "main"},
+        "/m/src/use.f90": {"rel_path": "src/use.f90", "component": "use"},
+        "/m/src/geom.f90": {"rel_path": "src/geom.f90", "component": "geom"},
+    }
+    return {
+        "functions": functions, "calls": calls, "accesses": accesses,
+        "passes": passes, "types": STRUCT_TYPES, "variables": variables,
+        "entity_types": {"var:m_geom::cell_module": "t_cell"},
+        "model_root": "/m", "file_meta": file_meta,
+    }
+
+
+class StructModelTests(unittest.TestCase):
+    def setUp(self):
+        self.src = make_struct_source()
+        self.graph = vis.build_graph(
+            self.src["functions"], self.src["calls"], self.src["file_meta"], "/m")
+        self.trace = vis.build_traces(self.src, self.graph)
+        self.registry = self.trace.registry
+
+    def test_value_type_is_detected(self):
+        self.assertTrue(self.registry.is_value("t_coord"))
+        self.assertFalse(self.registry.is_value("t_cell"))
+        self.assertFalse(self.registry.is_value("t_base"))
+
+    def test_nested_and_pointer_routes(self):
+        res = self.registry.resolve("field:t_patch%cells%center%x")
+        self.assertEqual(res.member, "t_cell%center")
+        self.assertEqual(res.route, "t_patch%cells%center%x")
+        self.assertEqual(res.subcomponent, "x")
+        self.assertIn("t_cell", res.owner_chain)
+        pointer = self.registry.resolve("field:t_patch%holder%target%area")
+        self.assertEqual(pointer.member, "t_cell%area")
+        self.assertFalse(pointer.unresolved)
+
+    def test_inherited_member_resolves_to_base(self):
+        res = self.registry.resolve("field:t_child%base_val")
+        self.assertEqual(res.member, "t_base%base_val")
+        self.assertIn("t_base", res.owner_chain)
+        fields = self.registry.fields_with_owner("t_child")
+        inherited = {f["name"]: f for f in fields if f.get("inheritedFrom")}
+        self.assertIn("base_val", inherited)
+        self.assertEqual(inherited["base_val"]["declaring"], "t_base")
+
+    def test_value_tail_creates_one_member_group(self):
+        route = "field:t_patch%cells%center%x"
+        member = "field:t_cell%center"
+        self.assertEqual(self.trace.group_of[route], self.trace.group_of[member])
+        rec = self.trace.groups[self.trace.group_of[member]]
+        self.assertEqual(rec["member"], "t_cell%center")
+        # The value tail is a route/facet, never a member identity of its own.
+        self.assertIn("field:t_cell%center%y", rec["entities"])
+        routes = {r[0] for r in rec["routes"]}
+        self.assertIn("t_patch%cells%center%x", routes)
+        self.assertIn("t_cell%center%y", routes)
+
+    def test_unresolved_routes_are_kept_verbatim(self):
+        res = self.registry.resolve("field:t_nowhere%leaf")
+        self.assertTrue(res.unresolved)
+        self.assertIsNone(res.member)
+        self.assertEqual(res.route, "t_nowhere%leaf")
+        self.assertIn("field:t_nowhere%leaf", self.trace.group_of)
+
+    def test_struct_formal_is_not_absorbed_into_field_group(self):
+        formal = "param:m_use::work::p_patch"
+        member = "field:t_cell%area"
+        self.assertNotEqual(self.trace.group_of[formal], self.trace.group_of[member])
+        self.assertNotIn(formal, self.trace.groups[self.trace.group_of[member]]["entities"])
+
+    def test_struct_formal_unions_with_same_type_holder(self):
+        formal = "param:m_use::work::cell"
+        holder = "var:m_geom::cell_module"
+        self.assertEqual(self.trace.group_of[formal], self.trace.group_of[holder])
+
+    def test_search_rows_carry_type_and_member(self):
+        rows = [r for r in self.trace.search if r[0] == "t_cell%area"]
+        self.assertTrue(rows)
+        self.assertEqual(rows[0][5], "t_cell")
+        self.assertEqual(rows[0][6], "t_cell%area")
+        self.assertTrue(any(r[0] == "t_cell" and r[2] == 3 for r in self.trace.search))
+
+    def test_struct_payload_containment_holders_and_cycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = vis.build_structs(self.src, self.trace, self.graph, tmp)
+            with open(os.path.join(tmp, "structs.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+            types = data["types"]
+            self.assertIn("t_cell", types)
+            parents = {tuple(p) for p in types["t_cell"]["parents"]}
+            self.assertIn(("t_patch", "cells"), parents)
+            self.assertIn(("t_holder", "target"), parents)
+            # A struct member without its own group still shows the routes of
+            # its nested members.
+            patch_routes = types["t_patch"]["routes"]["t_patch%cells"]
+            self.assertIn("t_patch%cells%center%x", {r[0] for r in patch_routes})
+            holder_ids = {h["id"] for h in types["t_cell"]["holders"]}
+            self.assertIn("var:m_geom::cell_module", holder_ids)
+            # Recursive t_holder -> t_holder rollup must terminate.
+            self.assertIn("t_holder", types)
+            self.assertTrue(summary["types"] >= 6)
+            # Touch shard for t_cell exists and contains member touch sets.
+            shard = types["t_cell"]["shard"]
+            with open(os.path.join(tmp, shard), encoding="utf-8") as fh:
+                touch = json.load(fh)["types"]["t_cell"]
+            self.assertIn("t_cell%area", touch["members"])
+
+    def test_duplicate_type_names_share_component_lookup(self):
+        types = vis.TypesView([
+            {"name": "t_dup", "module": "m_a", "fields": [
+                {"name": "only_a", "type": "integer"},
+            ]},
+            {"name": "t_dup", "module": "m_b", "fields": [
+                {"name": "only_b", "type": "integer"},
+                {"name": "ptr", "type": "t_child"},
+            ]},
+            {"name": "t_child", "module": "m_b", "fields": [
+                {"name": "value", "type": "real(kind=wp)"},
+                {"name": "a", "type": "integer"}, {"name": "b", "type": "integer"},
+                {"name": "c", "type": "integer"}, {"name": "d", "type": "integer"},
+            ]},
+        ])
+        registry = vis.TypeRegistry(types)
+        res = registry.resolve("field:t_dup%only_b")
+        self.assertEqual(res.member, "t_dup%only_b")
+        self.assertFalse(res.unresolved)
+        # The second declaration is chosen as the canonical page because it
+        # has the merged component set.
+        self.assertEqual(registry.get("t_dup")["module"], "m_b")
+
+    def test_polymorphic_component_resolves_through_unique_subtype(self):
+        types = vis.TypesView([
+            {"name": "t_base", "module": "m", "extends": None, "fields": [
+                {"name": "descr", "type": "integer"},
+            ]},
+            {"name": "t_impl", "module": "m", "extends": "t_base", "fields": [
+                {"name": "n_pnts", "type": "integer"},
+                {"name": "a", "type": "integer"}, {"name": "b", "type": "integer"},
+                {"name": "c", "type": "integer"}, {"name": "d", "type": "integer"},
+            ]},
+        ])
+        registry = vis.TypeRegistry(types)
+        res = registry.resolve("field:t_base%n_pnts")
+        self.assertEqual(res.member, "t_impl%n_pnts")
+        self.assertFalse(res.unresolved)
+        # An ambiguous component (declared by several subtypes) stays raw.
+        types2 = vis.TypesView([
+            {"name": "t_base", "fields": []},
+            {"name": "t_a", "extends": "t_base", "fields": [{"name": "x", "type": "integer"}]},
+            {"name": "t_b", "extends": "t_base", "fields": [{"name": "x", "type": "integer"}]},
+        ])
+        registry2 = vis.TypeRegistry(types2)
+        self.assertTrue(registry2.resolve("field:t_base%x").unresolved)
+
+    def test_routes_have_counts(self):
+        gid = self.trace.group_of["field:t_cell%area"]
+        routes = {r[0]: r for r in self.trace.groups[gid]["routes"]}
+        route = routes["t_patch%holder%target%area"]
+        self.assertEqual(route[1], 0)
+        # The first pure write to a field is promoted to its creation point.
+        self.assertEqual(route[2] + route[3], 1)
+        self.assertGreaterEqual(route[4], 1)
 
 
 if __name__ == "__main__":

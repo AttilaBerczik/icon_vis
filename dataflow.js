@@ -34,7 +34,9 @@ class DataflowClient {
         this.fallback = {
             search: null,
             fnShards: new Map(),
-            traces: new Map()
+            traces: new Map(),
+            structs: null,
+            structShards: new Map()
         };
     }
 
@@ -174,8 +176,8 @@ class DataflowClient {
         });
     }
 
-    async _fetchJson(relPath) {
-        const res = await fetch(this.base + relPath, { cache: "force-cache" });
+    async _fetchJson(relPath, cacheMode) {
+        const res = await fetch(this.base + relPath, { cache: cacheMode || "force-cache" });
         if (!res.ok) throw new Error(`HTTP ${res.status} for ${relPath}`);
         return res.json();
     }
@@ -191,6 +193,7 @@ class DataflowClient {
                 const mid = (lo + hi) >> 1;
                 if (data.names[mid] < q) lo = mid + 1; else hi = mid;
             }
+            const max = Math.max(1, Math.min(payload.limit || 50, 100));
             const out = [];
             const seen = new Set();
             for (let i = lo; i < data.names.length; i += 1) {
@@ -201,12 +204,28 @@ class DataflowClient {
                 seen.add(gid);
                 out.push({
                     name, groupId: gid,
-                    kind: ["field", "param", "var"][data.kinds[i]] || "other",
-                    reads: data.reads[i], writes: data.writes[i]
+                    kind: ["field", "param", "var", "struct", "local"][data.kinds[i]] || "other",
+                    reads: data.reads[i], writes: data.writes[i],
+                    type: (data.types && data.types[i]) || "",
+                    member: (data.members && data.members[i]) || "",
+                    fns: (data.fns && data.fns[i]) || 0
                 });
-                if (out.length >= (payload.limit || 50)) break;
+                if (out.length >= max * 2) break;
             }
-            return out;
+            const kindOrder = { struct: 0, field: 1, var: 2, param: 3, local: 4 };
+            out.sort((a, b) => {
+                const aExact = a.name === q ? 0 : (a.name.endsWith("%" + q) ? 1 : 2);
+                const bExact = b.name === q ? 0 : (b.name.endsWith("%" + q) ? 1 : 2);
+                if (aExact !== bExact) return aExact - bExact;
+                const aKind = kindOrder[a.kind] ?? 9;
+                const bKind = kindOrder[b.kind] ?? 9;
+                if (aKind !== bKind) return aKind - bKind;
+                const aSize = (a.reads || 0) + (a.writes || 0);
+                const bSize = (b.reads || 0) + (b.writes || 0);
+                if (aSize !== bSize) return bSize - aSize;
+                return a.name.length - b.name.length;
+            });
+            return out.slice(0, max);
         }
         if (type === "getParams") {
             const shard = payload.shard;
@@ -226,6 +245,38 @@ class DataflowClient {
                 this.fallback.traces.set(shard, data);
             }
             return (data.groups || {})[gid] || null;
+        }
+        if (type === "getStructs") {
+            if (!this.fallback.structs) {
+                this.fallback.structs = await this._fetchJson("structs.json", "no-cache");
+            }
+            return this.fallback.structs;
+        }
+        if (type === "getStructShard") {
+            const shard = payload.shard;
+            if (!shard) return null;
+            if (!this.fallback.structShards.has(shard)) {
+                this.fallback.structShards.set(shard, await this._fetchJson(shard, "no-cache"));
+            }
+            return this.fallback.structShards.get(shard);
+        }
+        if (type === "getStructTouch") {
+            const structs = await this._fallback("getStructs", {});
+            const rec = structs && structs.types ? structs.types[payload.typeKey] : null;
+            if (!rec || !rec.shard) return null;
+            const data = await this._fallback("getStructShard", { shard: rec.shard });
+            return data && data.types ? (data.types[payload.typeKey] || null) : null;
+        }
+        if (type === "getFunctionUsage") {
+            const nodeId = Number(payload.nodeId);
+            if (!Number.isFinite(nodeId)) return [];
+            const shard = `struct/fn/${(Math.abs(nodeId) % 32).toString(16).padStart(2, "0")}.json`;
+            try {
+                const data = await this._fallback("getStructShard", { shard });
+                return data && data.functions ? (data.functions[String(nodeId)] || []) : [];
+            } catch (err) {
+                return [];
+            }
         }
         if (type === "prefetchParams") {
             for (const shard of payload.shards || []) {
@@ -253,6 +304,22 @@ class DataflowClient {
 
     prefetchParams(shards) {
         return this._request("prefetchParams", { shards }).catch(() => null);
+    }
+
+    getStructs() {
+        return this._request("getStructs", {}).catch(() => null);
+    }
+
+    getStructTouch(typeKey) {
+        return this._request("getStructTouch", { typeKey }).catch(() => null);
+    }
+
+    getStructShard(shard) {
+        return this._request("getStructShard", { shard }).catch(() => null);
+    }
+
+    getFunctionUsage(nodeId) {
+        return this._request("getFunctionUsage", { nodeId }).catch(() => []);
     }
 }
 

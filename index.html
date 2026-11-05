@@ -1624,11 +1624,23 @@
         }
 
         .data-search-name {
+            flex: 1;
+            min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             font-family: var(--font-mono);
             font-size: 11.5px;
+        }
+
+        .data-search-kind {
+            flex-shrink: 0;
+            margin-left: 6px;
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
 
         .data-search-counts {
@@ -1654,7 +1666,9 @@
         }
 
         .data-search-item.active .data-search-counts,
-        .data-search-item:hover .data-search-counts {
+        .data-search-item:hover .data-search-counts,
+        .data-search-item.active .data-search-kind,
+        .data-search-item:hover .data-search-kind {
             color: rgba(255, 255, 255, 0.8);
         }
 
@@ -1961,6 +1975,31 @@
         }
 
         .param-flow:hover {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+            color: var(--accent-hover);
+        }
+
+        .param-struct {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+        }
+
+        .param-struct svg {
+            width: 12px;
+            height: 12px;
+        }
+
+        .param-struct:hover {
             background: var(--accent-soft);
             border-color: var(--accent);
             color: var(--accent-hover);
@@ -2474,6 +2513,580 @@
         }
 
         /* =========================================================================
+           Struct & variable explorer tab
+           ========================================================================= */
+
+        .tab-content-container.struct-content {
+            flex-direction: column;
+            overflow: hidden;
+            height: 100%;
+            padding: 0;
+            gap: 0;
+            background: var(--bg-canvas);
+        }
+
+        .struct-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+            min-height: 30px;
+            padding: 4px 8px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .struct-nav {
+            display: inline-flex;
+            gap: 1px;
+            flex-shrink: 0;
+        }
+
+        .struct-icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: 2px;
+            background: transparent;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 10px;
+        }
+
+        .struct-icon-btn:hover:not(:disabled) {
+            background: var(--bg-hover);
+            border-color: var(--border);
+            color: var(--text);
+        }
+
+        .struct-icon-btn:disabled {
+            opacity: 0.35;
+        }
+
+        .struct-crumbs {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .struct-crumbs::-webkit-scrollbar {
+            display: none;
+        }
+
+        .struct-crumb {
+            flex-shrink: 0;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 1px 3px;
+            border: 0;
+            border-radius: 2px;
+            background: transparent;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .struct-crumb:hover {
+            background: var(--bg-hover);
+            color: var(--accent-hover);
+        }
+
+        .struct-crumb.is-facet {
+            color: var(--text-faint);
+            font-style: italic;
+        }
+
+        .struct-crumb-sep {
+            flex-shrink: 0;
+            color: var(--text-faint);
+            font-size: 10px;
+        }
+
+        .struct-scope,
+        .struct-sort {
+            flex-shrink: 0;
+            height: 22px;
+            padding: 0 4px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+        }
+
+        .struct-action {
+            flex-shrink: 0;
+            height: 22px;
+            padding: 0 8px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .struct-action:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+            color: var(--accent-hover);
+        }
+
+        .struct-body {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            overflow-y: auto;
+            padding: 9px;
+        }
+
+        .struct-header {
+            flex-shrink: 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .struct-title {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .struct-title-name {
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .struct-badge {
+            padding: 1px 5px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .struct-meta {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 3px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 10px;
+        }
+
+        .struct-dot {
+            color: var(--text-faint);
+        }
+
+        .struct-link {
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 10px;
+        }
+
+        .struct-link:hover {
+            text-decoration: underline;
+        }
+
+        .struct-stats {
+            margin-top: 4px;
+            color: var(--text-faint);
+            font-family: var(--font-mono);
+            font-size: 9.5px;
+        }
+
+        .struct-chip-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .struct-chip-label {
+            margin-right: 2px;
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .struct-chip {
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 1px 6px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 9.5px;
+        }
+
+        .struct-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent-hover);
+        }
+
+        .struct-chip.active {
+            border-color: var(--accent);
+            background: var(--accent-soft);
+            color: var(--accent-hover);
+        }
+
+        .struct-chip.is-static:hover {
+            border-color: var(--border);
+            color: var(--text-muted);
+        }
+
+        .struct-notice {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-shrink: 0;
+            padding: 5px 7px;
+            border: 1px solid var(--amber);
+            border-radius: 2px;
+            background: var(--amber-soft, rgba(245, 158, 11, 0.08));
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+        }
+
+        .struct-controls {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .struct-filter {
+            flex: 1;
+            min-width: 100px;
+            height: 22px;
+            padding: 0 6px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-surface);
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 10px;
+        }
+
+        .struct-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            white-space: nowrap;
+        }
+
+        .struct-member-list {
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .struct-member-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 26px;
+            padding: 2px 4px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .struct-member-row:hover {
+            background: var(--bg-surface);
+        }
+
+        .struct-member-row.is-dim {
+            opacity: 0.4;
+        }
+
+        .struct-member-name {
+            min-width: 92px;
+            max-width: 190px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            text-align: left;
+        }
+
+        .struct-member-name:hover {
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+
+        .struct-member-type {
+            min-width: 82px;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 9.5px;
+        }
+
+        .struct-inherited {
+            padding: 0 4px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 8.5px;
+            text-transform: uppercase;
+        }
+
+        .struct-used {
+            min-width: 28px;
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 9px;
+        }
+
+        .struct-used.is-used {
+            color: var(--green);
+            font-weight: 600;
+        }
+
+        .struct-usage-bar {
+            flex: 1;
+            min-width: 24px;
+            max-width: 90px;
+            height: 5px;
+            overflow: hidden;
+            border-radius: 2px;
+            background: var(--bg-hover);
+        }
+
+        .struct-usage-fill {
+            display: block;
+            height: 100%;
+            background: var(--accent);
+            opacity: 0.65;
+        }
+
+        .struct-member-counts {
+            display: inline-flex;
+            gap: 4px;
+            flex-shrink: 0;
+            color: var(--text-faint);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .struct-peek {
+            padding: 3px 4px 6px 10px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .struct-route-table {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .struct-route-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 22px;
+            padding: 1px 6px;
+            border: 0;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-surface);
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 9.5px;
+            text-align: left;
+        }
+
+        .struct-route-row:last-child {
+            border-bottom: 0;
+        }
+
+        .struct-route-row.is-head {
+            background: var(--bg-panel);
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            text-transform: uppercase;
+        }
+
+        button.struct-route-row:hover {
+            background: var(--bg-hover);
+        }
+
+        .struct-route-name {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .struct-route-counts {
+            flex-shrink: 0;
+            color: var(--text-faint);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .struct-origin,
+        .struct-section {
+            flex-shrink: 0;
+            padding: 6px 7px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-panel);
+        }
+
+        .struct-origin-title,
+        .struct-section-title {
+            color: var(--text-faint);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .struct-origin-fn {
+            margin-top: 2px;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .struct-origin-loc {
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 9.5px;
+        }
+
+        .struct-section-title {
+            margin-bottom: 4px;
+        }
+
+        .struct-actions {
+            display: flex;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        .struct-timeline,
+        .struct-variable-timeline {
+            flex: 1;
+            min-height: 160px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .struct-function-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .struct-function-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 24px;
+            padding: 1px 3px;
+            border: 0;
+            border-bottom: 1px solid var(--border);
+            background: transparent;
+            text-align: left;
+        }
+
+        .struct-function-row:hover {
+            background: var(--bg-surface);
+        }
+
+        .struct-function-type {
+            min-width: 70px;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-faint);
+            font-family: var(--font-mono);
+            font-size: 9px;
+        }
+
+        .struct-function-name {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+        }
+
+        .struct-function-mask {
+            flex-shrink: 0;
+            color: var(--text-faint);
+            font-family: var(--font-mono);
+            font-size: 9px;
+        }
+
+        .struct-empty {
+            padding: 12px;
+            color: var(--text-faint);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        /* =========================================================================
            Lifecycle inspector tab
            ========================================================================= */
 
@@ -2738,6 +3351,26 @@
 
         .lifecycle-pass {
             color: #0284C7;
+        }
+
+        .lifecycle-link {
+            cursor: pointer;
+            text-decoration: underline dotted;
+            text-underline-offset: 2px;
+        }
+
+        .lifecycle-link:hover {
+            color: var(--accent-hover);
+        }
+
+        #trace-entity.struct-link {
+            cursor: pointer;
+            text-decoration: underline dotted;
+            text-underline-offset: 2px;
+        }
+
+        #trace-entity.struct-link:hover {
+            color: var(--accent-hover);
         }
 
         .lifecycle-via {
@@ -3291,6 +3924,16 @@
                 <path d="M3 6h.01M3 12h.01M3 18h.01"></path>
             </svg>
             <span class="ctx-label">Show parameters</span>
+        </div>
+        <div id="ctx-show-data" class="ctx-item" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+            </svg>
+            <span class="ctx-label">Data used here</span>
         </div>
         <div id="ctx-hide-file" class="ctx-item" role="menuitem">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"

@@ -21,6 +21,17 @@ _ID_TYPES = {
 }
 _SKIP_SCOPES = {"function_definition"}
 
+# Type-construction calls (`View2D<T>(...)`, `std::vector<int>(n)`); these are
+# initialisers, not calls to a model function. Their arguments are still reads.
+_CONSTRUCTOR_NAMES = {
+    "view", "view1d", "view2d", "view3d",
+    "constview1d", "constview2d", "constview3d",
+    "matrixview", "minindexview",
+    "managedview1d", "managedview2d", "managedview3d",
+    "dualview", "unmanagedview",
+    "vector", "array", "string", "optional", "tuple", "pair",
+}
+
 _TYPE_WORDS = {
     "std", "auto", "const", "void", "int", "double", "float", "bool", "char",
     "long", "short", "unsigned", "signed", "size_t", "true", "false", "nullptr",
@@ -100,6 +111,16 @@ def _scan_paths(text: str) -> list[str]:
     out: list[str] = []
     i, n = 0, len(text or "")
     while i < n:
+        if text[i] in ('"', "'"):
+            # String/character literals are data, not path expressions. Without
+            # this, a label such as "compute_indexes" would look like a read of
+            # a local with the same name.
+            quote = text[i]
+            i += 1
+            while i < n and text[i] != quote:
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
         if text[i].isalpha() or text[i] == "_":
             path, end, inner = _read_path(text, i)
             if path and path not in out:
@@ -149,6 +170,32 @@ def _declarator_name(node) -> str:
     if t == "operator_cast":
         return "operator_cast"
     return ""
+
+
+def _declarator_qualified_parts(node) -> list[str]:
+    """All lower-case components of a (possibly qualified) declarator.
+
+    ``Patch::init`` -> ``["patch", "init"]`` and
+    ``icon::f2c::init`` -> ``["icon", "f2c", "init"]``. The out-of-line
+    definition has to keep the qualifier: otherwise a method loses its class
+    scope and ``this->field`` never reaches the struct member table.
+    """
+    if node is None:
+        return []
+    t = node.type
+    if t == "qualified_identifier":
+        scope = node.child_by_field_name("scope")
+        name = node.child_by_field_name("name")
+        return [*_declarator_qualified_parts(scope),
+                *([_text(name).lower()] if name is not None else [])]
+    if t in _ID_TYPES:
+        return [_text(node).lower()]
+    if t == "template_function":
+        return _declarator_qualified_parts(node.child_by_field_name("name"))
+    if t in ("pointer_declarator", "reference_declarator", "parenthesized_declarator",
+             "attributed_declarator", "init_declarator", "function_declarator"):
+        return _declarator_qualified_parts(node.child_by_field_name("declarator"))
+    return []
 
 
 def _unwrap_declarator(node):
@@ -248,20 +295,41 @@ def _class_fields(node, class_name: str) -> dict:
     body = node.child_by_field_name("body")
     for child in (body.children if body is not None else []):
         if child.type == "field_declaration":
-            decl = child.child_by_field_name("declarator")
-            fd = _function_declarator(decl)
-            if fd is not None:
-                methods.append({"name": _declarator_name(fd.child_by_field_name("declarator"))})
-                continue
             type_node = child.child_by_field_name("type")
             spec = _text(type_node) if type_node is not None else "auto"
-            name = _declarator_name(decl)
-            if not name:
-                continue
-            d = make_decl(name, spec, [], rank=_array_rank(decl) if decl is not None else 0)
-            d["type"] = _cpp_type_name(spec)
-            d["class"] = class_name
-            fields.append(d)
+            # A field declaration can introduce several declarators
+            # (`int a, b;` / `double *c, d[3];`); only looking at the
+            # `declarator` field would silently drop all but the first.
+            for decl in child.children:
+                if decl.type in ("type_qualifier", "primitive_type", "type_identifier",
+                                 "qualified_identifier", "template_type", "sized_type_specifier",
+                                 "struct_specifier", "class_specifier", "enum_specifier",
+                                 "decltype", ",", ";"):
+                    continue
+                fd = _function_declarator(decl)
+                if fd is not None:
+                    inner = fd.child_by_field_name("declarator")
+                    mname = _declarator_name(inner)
+                    if mname:
+                        methods.append({"name": mname})
+                    # A function pointer (`void (*cb)(int)`) is a data member,
+                    # not a method declaration; keep it in the field table so
+                    # `obj.cb = ...` resolves to a struct member.
+                    if inner is not None and inner.type in (
+                            "parenthesized_declarator", "pointer_declarator",
+                            "reference_declarator"):
+                        d = make_decl(mname, spec, [])
+                        d["type"] = "function"
+                        d["class"] = class_name
+                        fields.append(d)
+                    continue
+                name = _declarator_name(decl)
+                if not name:
+                    continue
+                d = make_decl(name, spec, [], rank=_array_rank(decl))
+                d["type"] = _cpp_type_name(spec)
+                d["class"] = class_name
+                fields.append(d)
         elif child.type == "function_definition":
             fd = _function_declarator(child.child_by_field_name("declarator"))
             if fd is not None:
@@ -276,12 +344,12 @@ def _resolve_callee(fn_node) -> tuple[str, str | None, str | None]:
     t = fn_node.type
     if t in ("identifier", "field_identifier", "qualified_identifier", "template_function",
              "operator_name", "destructor_name"):
-        txt = _text(fn_node)
-        # qualified: Kokkos::deep_copy
-        if "::" in txt:
-            parts = [p.strip() for p in txt.split("::")]
-            return parts[-1].lower(), None, "::".join(parts[:-1]).lower() or None
-        return txt.lower(), None, None
+        # Keep the qualifier but drop explicit template arguments:
+        # `Kokkos::fmin<T>` -> callee `fmin`, scope `kokkos`.
+        parts = _declarator_qualified_parts(fn_node) or [_text(fn_node).lower()]
+        if len(parts) >= 2:
+            return parts[-1], None, "::".join(parts[:-1]) or None
+        return parts[0], None, None
     if t == "field_expression":
         field = fn_node.child_by_field_name("field")
         argument = fn_node.child_by_field_name("argument")
@@ -293,6 +361,21 @@ def _resolve_callee(fn_node) -> tuple[str, str | None, str | None]:
     return _text(fn_node).lower(), None, None
 
 
+def _expr_paths(node) -> list[str]:
+    """Paths read by an expression, ignoring explicit template arguments.
+
+    ``View2D<T, ExecutionSpace>(dz, ke, nvec)`` must read ``dz``/``ke``/``nvec``
+    only; scanning the raw text would also pick up ``T`` (often the name of a
+    real parameter) and ``ExecutionSpace``.
+    """
+    if node is None:
+        return []
+    if node.type == "call_expression":
+        return [p for a in _args(node.child_by_field_name("arguments"))
+                for p in a["paths"]]
+    return _paths(_text(node))
+
+
 def _args(node) -> list[dict]:
     args: list[dict] = []
     if node is None:
@@ -300,9 +383,17 @@ def _args(node) -> list[dict]:
     for c in node.children:
         if c.type in ("(", ")", ","):
             continue
+        if c.type == "lambda_expression":
+            # A lambda body is parsed as statements by add_function; its text
+            # must not be mistaken for the call's argument reads.
+            args.append({"keyword": None, "expr": "<lambda>", "paths": [],
+                         "path": None})
+            continue
         expr = _text(c)
-        args.append({"keyword": None, "expr": expr, "paths": _paths(expr),
-                     "path": _cpp_path(expr)})
+        paths = _expr_paths(c)
+        # A call result is not a variable that can be passed by reference.
+        path = None if c.type == "call_expression" else _cpp_path(expr)
+        args.append({"keyword": None, "expr": expr, "paths": paths, "path": path})
     return args
 
 
@@ -328,20 +419,55 @@ def parse(path: str, rel_path: str, raw_text: str, linemap: LineMap,
     def orig_line(node) -> int:
         return linemap.get(_line(node))[1]
 
+    type_names: set[str] = set()
+
     def add_function(fn_node, scope: list[str], class_scope: str | None):
         fd = _function_declarator(fn_node.child_by_field_name("declarator"))
         if fd is None:
             return
-        name = _declarator_name(fd.child_by_field_name("declarator"))
+        decl_node = fd.child_by_field_name("declarator")
+        decl_parts = _declarator_qualified_parts(decl_node)
+        if decl_parts:
+            name = decl_parts[-1]
+            decl_scope = decl_parts[:-1]
+        else:
+            name = _declarator_name(decl_node)
+            decl_scope = []
         if not name:
             return
-        qualified = "::".join([*scope, *([class_scope] if class_scope else []), name])
+        # An out-of-line definition such as `void Patch::init()` carries its
+        # class/namespace in the declarator; in-class definitions use the
+        # enclosing class_scope instead.
+        qualified = "::".join([
+            *scope,
+            *([class_scope] if class_scope else []),
+            *decl_scope,
+            name,
+        ])
         pid = f"cpp:{qualified}@{orig_line(fn_node)}"
         params = _parse_params(fd)
         decls = list(params)
+        var_names = {d["name"] for d in decls}
         stmts: list[dict] = []
         aliases: list[dict] = []
         local_markers: list[dict] = []
+
+        def variable_access(node) -> str | None:
+            """Return the root of a call-style variable access, else None.
+
+            Kokkos views and C arrays use ``d_t(k, iv)`` / ``d_qx[i](k, iv)``,
+            which tree-sitter parses as call expressions. Treating those as
+            function calls creates bogus ``ext:external:d_t`` nodes and hides
+            the read of the view.
+            """
+            if node is None:
+                return None
+            if node.type in ("identifier", "field_identifier"):
+                root = _text(node).lower()
+                return root if root in var_names else None
+            if node.type == "subscript_expression":
+                return variable_access(node.child_by_field_name("argument"))
+            return None
 
         def rec(n, in_lambda=False):
             for child in n.children:
@@ -353,8 +479,10 @@ def parse(path: str, rel_path: str, raw_text: str, linemap: LineMap,
                 if child.type == "function_definition" and child is not fn_node:
                     continue
                 if child.type == "declaration":
+                    before = len(decls)
                     for init in _collect_decls(child, decls, orig_line):
                         stmts.append(init)
+                    var_names.update(d["name"] for d in decls[before:])
                 elif child.type == "assignment_expression":
                     left = child.child_by_field_name("left")
                     right = child.child_by_field_name("right")
@@ -363,7 +491,7 @@ def parse(path: str, rel_path: str, raw_text: str, linemap: LineMap,
                     if lpath:
                         opl = _text(op) if op is not None else "="
                         stmts.append({
-                            "op": "assign", "lhs": lpath, "rhs": _paths(_text(right)),
+                            "op": "assign", "lhs": lpath, "rhs": _expr_paths(right),
                             "line": orig_line(child), "text": _text(child)[:400],
                             "compound": opl not in ("=", ""),
                         })
@@ -375,8 +503,27 @@ def parse(path: str, rel_path: str, raw_text: str, linemap: LineMap,
                                       "line": orig_line(child), "text": txt[:400]})
                 elif child.type == "call_expression":
                     fn = child.child_by_field_name("function")
+                    var_root = variable_access(fn)
+                    if var_root is not None:
+                        # Array/View element access, not a function call.
+                        paths = _paths(_text(child))
+                        if paths:
+                            stmts.append({"op": "expr", "rhs": paths,
+                                          "line": orig_line(child), "text": _text(child)[:400]})
+                        rec(child, in_lambda)
+                        continue
                     callee, recv, qual = _resolve_callee(fn)
                     args = _args(child.child_by_field_name("arguments"))
+                    if callee in _CONSTRUCTOR_NAMES or callee in type_names:
+                        # Object construction, not a function call. Keep the
+                        # argument reads; `_collect_decls` already records the
+                        # initialisation of the declared object.
+                        read_paths = [p for a in args for p in a["paths"]]
+                        if read_paths:
+                            stmts.append({"op": "expr", "rhs": read_paths,
+                                          "line": orig_line(child), "text": _text(child)[:400]})
+                        rec(child, in_lambda)
+                        continue
                     if callee:
                         if callee in ("deep_copy", "create_mirror_view_and_copy", "copy"):
                             if args:
@@ -406,7 +553,7 @@ def parse(path: str, rel_path: str, raw_text: str, linemap: LineMap,
                     if expr_node is None and child.type == "return_statement":
                         expr_node = next((c for c in child.children if c.type not in ("return", ";")), None)
                     if expr_node is not None:
-                        paths = _paths(_text(expr_node))
+                        paths = _expr_paths(expr_node)
                         if paths:
                             stmts.append({"op": "expr", "rhs": paths,
                                           "line": orig_line(child), "text": _text(child)[:400]})
@@ -443,6 +590,7 @@ def parse(path: str, rel_path: str, raw_text: str, linemap: LineMap,
                 cname = _text(name_node).lower() if name_node is not None else ""
                 info = _class_fields(child, cname)
                 if cname:
+                    type_names.add(cname)
                     facts["types"].append({
                         "name": cname, "module": scope[-1] if scope else None,
                         "line": orig_line(child), "extends": info["base"],
@@ -473,13 +621,18 @@ def _collect_decls(node, decls: list[dict], line_fn=None) -> list[dict]:
     line = line_fn(node) if line_fn else 0
     for child in node.children:
         if child.type not in ("init_declarator", "identifier", "field_identifier",
-                              "pointer_declarator", "reference_declarator", "array_declarator"):
+                              "pointer_declarator", "reference_declarator", "array_declarator",
+                              "function_declarator"):
             continue
         if child.type in ("identifier", "field_identifier"):
             d = make_decl(_text(child).lower(), spec, [])
             d["type"] = _cpp_type_name(spec)
             decls.append(d)
-        elif child.type in ("pointer_declarator", "reference_declarator", "array_declarator", "init_declarator"):
+        elif child.type in ("pointer_declarator", "reference_declarator", "array_declarator",
+                            "init_declarator", "function_declarator"):
+            if child.type == "function_declarator" and spec.strip().lower() == "void":
+                # A local function prototype, not an object construction.
+                continue
             name = _declarator_name(child)
             if not name:
                 continue
@@ -495,7 +648,18 @@ def _collect_decls(node, decls: list[dict], line_fn=None) -> list[dict]:
                 if value is not None:
                     inits.append({
                         "op": "assign", "lhs": name,
-                        "rhs": _paths(_text(value)), "line": line_fn(value) if line_fn else line,
+                        "rhs": _expr_paths(value), "line": line_fn(value) if line_fn else line,
                         "text": _text(child)[:400],
+                    })
+            elif child.type == "function_declarator":
+                # Direct-initialisation (`View2D<T> d_view(x, n, m);`) is an
+                # object construction: the arguments are reads, but this is
+                # not a call to a function named `d_view`.
+                params_node = child.child_by_field_name("parameters")
+                if params_node is not None:
+                    inits.append({
+                        "op": "assign", "lhs": name,
+                        "rhs": [p for a in _args(params_node) for p in a["paths"]],
+                        "line": line, "text": _text(child)[:400],
                     })
     return inits

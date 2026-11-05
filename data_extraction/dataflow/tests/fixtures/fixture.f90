@@ -27,6 +27,7 @@ CONTAINS
   SUBROUTINE caller(state)
     TYPE(t_state), INTENT(INOUT) :: state
     REAL(wp) :: value
+    REAL(wp), DIMENSION(:,:,:), ALLOCATABLE :: grid
     CALL writer(state, 1)
     CALL reader(state, value)
   END SUBROUTINE caller
